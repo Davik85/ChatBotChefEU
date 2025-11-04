@@ -1,0 +1,22 @@
+{
+  "start_message": "Willkommen bei ChatBotChef EU! Lass uns etwas Großartiges kochen.",
+  "choose_language": "Bitte wähle deine bevorzugte Sprache:",
+  "language_saved": "Sprache gespeichert. Weiter geht's!",
+  "only_text": "Ich akzeptiere nur Textnachrichten, damit ich deine Wünsche verstehe.",
+  "premium_status_active": "Dein Premium ist aktiv bis {date}.",
+  "premium_status_inactive": "Premium ist noch nicht aktiv. Upgrade, um ohne Limit zu kochen!",
+  "premium_invalid_command": "Verwendung: /grantpremium <userId> <days>.",
+  "premium_granted": "Premium verlängert bis {date}.",
+  "not_authorized": "Du bist nicht berechtigt, diesen Befehl auszuführen.",
+  "admin_stats": "Installationen: {users}\nPremium: {premium}\nDAU-7d: {dau}",
+  "broadcast_usage": "Verwendung: /broadcast [markdown|html] <nachricht>",
+  "broadcast_ack": "Broadcast für {count} Nutzer geplant.",
+  "limit_reached": "Du hast das Freilimit von {limit} Nachrichten erreicht. Premium für {duration} Tage kostet {price} €.",
+  "chef_intro": "Idee des Kochs:",
+  "calorie_prefix": "Hier ist die Kalorien- und Makroübersicht:",
+  "recipe_prefix": "Hier ist ein freundlicher Rezeptvorschlag:",
+  "ai_error": "Gerade fehlt mir die Inspiration. Bitte später erneut versuchen.",
+  "system_prompt": "Du bist ChatBotChef, ein kulinarischer Assistent für gesunde und leckere europäische Rezepte. Antworte knapp.",
+  "calorie_keywords": ["kalorie", "kalorien", "makro", "makros"],
+  "premium_reminder": "Dein Premium endet am {date}. Verlängere, um weiter ohne Grenzen zu kochen!"
+}

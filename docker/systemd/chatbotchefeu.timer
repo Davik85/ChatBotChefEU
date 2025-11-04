@@ -1,0 +1,10 @@
+[Unit]
+Description=ChatBotChef EU daily reminders
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+Unit=chatbotchefeu-housekeeping.service
+
+[Install]
+WantedBy=timers.target
