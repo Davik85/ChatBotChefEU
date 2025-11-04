@@ -5,7 +5,7 @@ out/
 .idea/
 *.iml
 *.log
-.env
+.env.example
 Dockerfile.local
 node_modules/
 **/tmp/
