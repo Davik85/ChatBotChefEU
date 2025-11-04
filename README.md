@@ -31,12 +31,27 @@ Key variables:
 
 ## Local Development
 
+### Wrapper
+
 ```bash
+./gradlew wrapper --gradle-version 8.7
+```
+
+### Local run
+
+```bash
+cp .env.example .env   # заполнить секреты
 ./gradlew clean test installDist
 ./build/install/ChatBotChefEU/bin/ChatBotChefEU
 ```
 
 Health endpoint: `GET http://localhost:8080/health` → `OK`.
+
+### Pre-commit hook
+
+```
+git update-index --chmod=+x .git/hooks/pre-commit
+```
 
 ### Running in Docker
 
