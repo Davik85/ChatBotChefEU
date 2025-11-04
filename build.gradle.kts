@@ -1,16 +1,10 @@
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-
 plugins {
-    application
     kotlin("jvm") version "1.9.23"
+    application
 }
 
 group = "com.chatbotchefeu"
 version = "0.1.0"
-
-application {
-    mainClass.set("app.ApplicationKt")
-}
 
 repositories {
     mavenCentral()
@@ -64,7 +58,11 @@ dependencies {
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
 
-tasks.withType<KotlinCompile> {
+application {
+    mainClass.set("app.ApplicationKt")
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
     kotlinOptions {
         freeCompilerArgs = listOf("-Xjsr305=strict")
         jvmTarget = "17"
@@ -74,4 +72,3 @@ tasks.withType<KotlinCompile> {
 tasks.test {
     useJUnitPlatform()
 }
-
