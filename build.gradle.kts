@@ -13,7 +13,7 @@ repositories {
 }
 
 val ktorVersion = "2.3.12"
-val exposedVersion = "0.47.0"
+val exposedVersion = "0.49.0"
 val junitVersion = "5.10.2"
 val nettyBom = "4.1.114.Final"
 val logbackVersion = "1.5.12"

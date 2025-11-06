@@ -12,7 +12,7 @@ class DeduplicationService {
     suspend fun markProcessed(updateId: Long): Boolean {
         return DatabaseFactory.dbQuery {
             val exists = ProcessedUpdatesTable
-                .select { ProcessedUpdatesTable.updateId eq updateId }
+                .select(where = { ProcessedUpdatesTable.updateId eq updateId })
                 .limit(1)
                 .toList()
                 .isNotEmpty()

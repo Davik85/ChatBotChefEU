@@ -10,7 +10,7 @@ import org.jetbrains.exposed.sql.update
 class UsageService {
     suspend fun incrementUsage(telegramId: Long): Int {
         return DatabaseFactory.dbQuery {
-            val current = UsageCountersTable.select { UsageCountersTable.telegramId eq telegramId }
+            val current = UsageCountersTable.select(where = { UsageCountersTable.telegramId eq telegramId })
                 .limit(1)
                 .map(::toUsage)
                 .firstOrNull()
@@ -30,7 +30,7 @@ class UsageService {
 
     suspend fun getUsage(telegramId: Long): Int {
         return DatabaseFactory.dbQuery {
-            UsageCountersTable.select { UsageCountersTable.telegramId eq telegramId }
+            UsageCountersTable.select(where = { UsageCountersTable.telegramId eq telegramId })
                 .limit(1)
                 .map(::toUsage)
                 .firstOrNull()
