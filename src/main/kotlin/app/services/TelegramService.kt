@@ -27,7 +27,9 @@ class TelegramService(
 
     suspend fun answerCallback(callbackId: String, text: String? = null) {
         val url = "$baseUrl/bot${config.botToken}/answerCallbackQuery"
-        val payload = mutableMapOf("callback_query_id" to callbackId)
+        val payload = mutableMapOf<String, Any>(
+            "callback_query_id" to callbackId
+        )
         if (!text.isNullOrBlank()) {
             payload["text"] = text
             payload["show_alert"] = false

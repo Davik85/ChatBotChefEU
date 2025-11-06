@@ -22,9 +22,10 @@ class PremiumService(private val billingConfig: BillingConfig) {
 
     suspend fun getPremiumUntil(telegramId: Long): Instant? {
         return DatabaseFactory.dbQuery {
-            PremiumTable.select { PremiumTable.telegramId eq telegramId }
+            PremiumTable
+                .select { PremiumTable.telegramId eq telegramId }
                 .limit(1)
-                .map(::toPremium)
+                .map { row -> row[PremiumTable.activeUntil].atZone(ZoneOffset.UTC).toInstant() }
                 .firstOrNull()
         }
     }
@@ -34,6 +35,7 @@ class PremiumService(private val billingConfig: BillingConfig) {
         val now = Instant.now(ClockProvider.clock)
         val newExpiry = getPremiumUntil(telegramId)?.takeIf { it.isAfter(now) }?.plus(days, ChronoUnit.DAYS)
             ?: now.plus(days, ChronoUnit.DAYS)
+
         DatabaseFactory.dbQuery {
             val expiry = newExpiry.atZone(ZoneOffset.UTC).toLocalDateTime()
             val updated = PremiumTable.update({ PremiumTable.telegramId eq telegramId }) {
@@ -54,21 +56,21 @@ class PremiumService(private val billingConfig: BillingConfig) {
         val now = Instant.now(ClockProvider.clock)
         val windows = daysBefore.map { now.plus(it, ChronoUnit.DAYS) }
         return DatabaseFactory.dbQuery {
-            PremiumTable.select { PremiumTable.activeUntil greater now.atZone(ZoneOffset.UTC).toLocalDateTime() }
-                .map(::toPremium)
+            PremiumTable
+                .select { PremiumTable.activeUntil greater now.atZone(ZoneOffset.UTC).toLocalDateTime() }
+                .map { row ->
+                    val userId = row[PremiumTable.telegramId]
+                    val expiry = row[PremiumTable.activeUntil].atZone(ZoneOffset.UTC).toInstant()
+                    userId to expiry
+                }
                 .mapNotNull { (userId, expiry) ->
                     val matches = windows.any { window ->
                         val windowStart = window.truncatedTo(ChronoUnit.DAYS)
                         val windowEnd = windowStart.plus(1, ChronoUnit.DAYS)
                         expiry.isAfter(windowStart) && expiry.isBefore(windowEnd)
                     }
-                    if (matches) Pair(userId, expiry) else null
+                    if (matches) userId to expiry else null
                 }
         }
-    }
-
-    private fun toPremium(row: ResultRow): Pair<Long, Instant> {
-        val expiry = row[PremiumTable.activeUntil].atZone(ZoneOffset.UTC).toInstant()
-        return row[PremiumTable.telegramId] to expiry
     }
 }

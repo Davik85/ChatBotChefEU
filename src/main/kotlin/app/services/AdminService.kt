@@ -7,8 +7,8 @@ import app.db.UsersTable
 import app.util.ClockProvider
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greaterEq
 import org.jetbrains.exposed.sql.count
-import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.select
+import org.jetbrains.exposed.sql.selectAll
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
@@ -23,13 +23,29 @@ class AdminService {
     suspend fun collectStats(): AdminStats {
         val now = Instant.now(ClockProvider.clock)
         val sevenDaysAgo = now.minus(7, ChronoUnit.DAYS)
+
         return DatabaseFactory.dbQuery {
-            val users = UsersTable.slice(UsersTable.id.count()).selectAll().single()[UsersTable.id.count()]
-            val premium = PremiumTable.slice(PremiumTable.id.count()).selectAll().single()[PremiumTable.id.count()]
+            // Users total
+            val users = UsersTable
+                .slice(UsersTable.id.count())
+                .selectAll()
+                .single()[UsersTable.id.count()]
+                .toLong()
+
+            // Premium rows total
+            val premium = PremiumTable
+                .slice(PremiumTable.id.count())
+                .selectAll()
+                .single()[PremiumTable.id.count()]
+                .toLong()
+
+            // Distinct telegram_id за 7 дней — через withDistinct() + count()
             val dau = MessagesHistoryTable
-                .slice(MessagesHistoryTable.telegramId.count(distinct = true))
+                .slice(MessagesHistoryTable.telegramId)
                 .select { MessagesHistoryTable.createdAt greaterEq sevenDaysAgo.atZone(ZoneOffset.UTC).toLocalDateTime() }
-                .single()[MessagesHistoryTable.telegramId.count(distinct = true)]
+                .withDistinct()
+                .count()
+
             AdminStats(
                 totalUsers = users,
                 premiumUsers = premium,

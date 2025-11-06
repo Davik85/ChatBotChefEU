@@ -2,21 +2,13 @@ package app
 
 import app.db.DatabaseFactory
 import app.openai.OpenAIClient
-import app.services.AdminService
-import app.services.DeduplicationService
-import app.services.MessageHistoryService
-import app.services.PremiumService
-import app.services.ReminderService
-import app.services.TelegramService
-import app.services.UpdateProcessor
-import app.services.UsageService
-import app.services.UserService
+import app.services.*
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
+import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.jackson.jackson
-import io.ktor.server.application.Application
-import io.ktor.server.application.call
+import io.ktor.server.application.*
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.callloging.CallLogging
@@ -24,6 +16,7 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.defaultheaders.DefaultHeaders
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receiveText
+import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
@@ -105,14 +98,14 @@ fun Application.module(
             val expectedSecret = appConfig.telegram.secretToken
             if (expectedSecret.isNotBlank() && secret != expectedSecret) {
                 logger.warn("Invalid secret token received")
-                call.respondText("Unauthorized", status = io.ktor.http.HttpStatusCode.Forbidden)
+                call.respond(HttpStatusCode.Forbidden)
                 return@post
             }
             val payload = call.receiveText()
             val update = runCatching { mapper.readValue(payload, Update::class.java) }
                 .onFailure { logger.warn("Failed to parse update: {}", it.message) }
                 .getOrNull()
-            call.respond(io.ktor.http.HttpStatusCode.OK)
+            call.respond(HttpStatusCode.OK) // быстрый ACK
             if (update == null) return@post
             processingScope.launch {
                 val processed = deduplicationService.markProcessed(update.updateId)
@@ -133,10 +126,9 @@ fun Application.module(
     }
 }
 
-private fun configuredMapper(): ObjectMapper {
-    return ObjectMapper().apply {
+private fun configuredMapper(): ObjectMapper =
+    ObjectMapper().apply {
         findAndRegisterModules()
         configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false)
         configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
     }
-}

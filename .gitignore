@@ -1,35 +1,48 @@
-.gradle
+# Gradle / build
 .gradle/
 build/
+out/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
-/.gradle/
-bot.db
-build/libs/.env
+
+# Project files
 ChatBotChefEU.bundle
 ChatBotChefEU.iml
+
+# Env & secrets
 .env
 .env.*
 !.env.example
+build/libs/.env
 
-### IntelliJ IDEA ###
-.idea/*
-.idea/modules.xml
-.idea/jarRepositories.xml
-.idea/compiler.xml
-.idea/libraries/
-*.iws
+# IDE
+.idea/
 *.iml
 *.ipr
-out/
-!**/src/main/**/out/
-!**/src/test/**/out/
+*.iws
+.vscode/
 
-### Kotlin ###
-.kotlin
+# OS junk
+.DS_Store
+Thumbs.db
 
-### Eclipse ###
+# Local data & DB
+data/
+*.db
+*.sqlite*
+*-wal
+*-shm
+
+# Logs (logback пишет в ./logs)
+logs/
+*.log
+
+# Docker / Nginx certs (НИКОГДА не коммитим приватные ключи)
+docker/nginx/certs/*.pem
+docker/nginx/certs/*.key
+
+# Eclipse / NetBeans (на всякий случай)
 .apt_generated
 .classpath
 .factorypath
@@ -40,26 +53,8 @@ out/
 bin/
 !**/src/main/**/bin/
 !**/src/test/**/bin/
-
-### NetBeans ###
 /nbproject/private/
 /nbbuild/
 /dist/
 /nbdist/
 /.nb-gradle/
-
-### VS Code ###
-.vscode/
-
-### Mac OS ###
-.DS_Store
-
-# Local data & DB
-data/
-*.db
-*.db-*
-*.sqlite
-*.sqlite3
-*.sqlite*
-*-wal
-*-shm

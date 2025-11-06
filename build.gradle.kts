@@ -1,3 +1,5 @@
+import org.gradle.api.file.DuplicatesStrategy
+
 plugins {
     kotlin("jvm") version "1.9.23"
     application
@@ -10,13 +12,15 @@ repositories {
     mavenCentral()
 }
 
-val ktorVersion = "2.3.8"
+val ktorVersion = "2.3.12"
 val exposedVersion = "0.47.0"
 val junitVersion = "5.10.2"
+val nettyBom = "4.1.114.Final"
+val logbackVersion = "1.5.12"
+val commonsCodecVersion = "1.17.1"
 
-kotlin {
-    jvmToolchain(17)
-}
+kotlin { jvmToolchain(17) }
+
 
 sourceSets {
     named("main") {
@@ -27,6 +31,14 @@ sourceSets {
 }
 
 dependencies {
+    // Выравнивание транзитивных зависимостей
+    implementation(enforcedPlatform("io.netty:netty-bom:$nettyBom"))
+    constraints {
+        implementation("ch.qos.logback:logback-classic:$logbackVersion")
+        implementation("commons-codec:commons-codec:$commonsCodecVersion")
+    }
+
+    // Ktor
     implementation("io.ktor:ktor-server-core-jvm:$ktorVersion")
     implementation("io.ktor:ktor-server-netty-jvm:$ktorVersion")
     implementation("io.ktor:ktor-server-content-negotiation-jvm:$ktorVersion")
@@ -37,6 +49,7 @@ dependencies {
     implementation("io.ktor:ktor-server-metrics-micrometer-jvm:$ktorVersion")
     implementation("io.ktor:ktor-serialization-jackson-jvm:$ktorVersion")
 
+    // DB / Exposed
     implementation("com.zaxxer:HikariCP:5.1.0")
     implementation("org.jetbrains.exposed:exposed-core:$exposedVersion")
     implementation("org.jetbrains.exposed:exposed-dao:$exposedVersion")
@@ -45,10 +58,12 @@ dependencies {
     implementation("org.xerial:sqlite-jdbc:3.45.3.0")
     implementation("org.postgresql:postgresql:42.7.3")
 
+    // HTTP / Logs / Metrics
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("ch.qos.logback:logback-classic:1.5.6")
+    implementation("ch.qos.logback:logback-classic:$logbackVersion")
     implementation("io.micrometer:micrometer-registry-prometheus:1.12.5")
 
+    // Tests
     testImplementation(kotlin("test"))
     testImplementation("io.ktor:ktor-server-tests-jvm:$ktorVersion")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
@@ -58,9 +73,7 @@ dependencies {
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
 
-application {
-    mainClass.set("app.ApplicationKt")
-}
+application { mainClass.set("app.ApplicationKt") }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
     kotlinOptions {
@@ -69,6 +82,9 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
     }
 }
 
-tasks.test {
-    useJUnitPlatform()
+// Избавляемся от «Entry application.conf is a duplicate»
+tasks.processResources {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
+
+tasks.test { useJUnitPlatform() }
