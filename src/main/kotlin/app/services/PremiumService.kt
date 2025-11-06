@@ -23,7 +23,7 @@ class PremiumService(private val billingConfig: BillingConfig) {
     suspend fun getPremiumUntil(telegramId: Long): Instant? {
         return DatabaseFactory.dbQuery {
             PremiumTable
-                .select { PremiumTable.telegramId eq telegramId }
+                .select(where = { PremiumTable.telegramId eq telegramId })
                 .limit(1)
                 .map { row -> row[PremiumTable.activeUntil].atZone(ZoneOffset.UTC).toInstant() }
                 .firstOrNull()
@@ -57,7 +57,7 @@ class PremiumService(private val billingConfig: BillingConfig) {
         val windows = daysBefore.map { now.plus(it, ChronoUnit.DAYS) }
         return DatabaseFactory.dbQuery {
             PremiumTable
-                .select { PremiumTable.activeUntil greater now.atZone(ZoneOffset.UTC).toLocalDateTime() }
+                .select(where = { PremiumTable.activeUntil greater now.atZone(ZoneOffset.UTC).toLocalDateTime() })
                 .map { row ->
                     val userId = row[PremiumTable.telegramId]
                     val expiry = row[PremiumTable.activeUntil].atZone(ZoneOffset.UTC).toInstant()

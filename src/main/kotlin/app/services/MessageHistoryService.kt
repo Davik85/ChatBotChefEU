@@ -27,7 +27,7 @@ class MessageHistoryService {
 
     suspend fun loadRecent(telegramId: Long): List<StoredMessage> {
         return DatabaseFactory.dbQuery {
-            MessagesHistoryTable.select { MessagesHistoryTable.telegramId eq telegramId }
+            MessagesHistoryTable.select(where = { MessagesHistoryTable.telegramId eq telegramId })
                 .orderBy(MessagesHistoryTable.createdAt, order = SortOrder.DESC)
                 .limit(HISTORY_LIMIT)
                 .map(::toStoredMessage)

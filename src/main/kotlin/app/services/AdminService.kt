@@ -26,25 +26,28 @@ class AdminService {
 
         return DatabaseFactory.dbQuery {
             // Users total
+            val userCountExpr = UsersTable.id.count()
             val users = UsersTable
-                .slice(UsersTable.id.count())
+                .slice(listOf(userCountExpr))
                 .selectAll()
-                .single()[UsersTable.id.count()]
+                .single()[userCountExpr]
                 .toLong()
 
             // Premium rows total
+            val premiumCountExpr = PremiumTable.id.count()
             val premium = PremiumTable
-                .slice(PremiumTable.id.count())
+                .slice(listOf(premiumCountExpr))
                 .selectAll()
-                .single()[PremiumTable.id.count()]
+                .single()[premiumCountExpr]
                 .toLong()
 
-            // Distinct telegram_id за 7 дней — через withDistinct() + count()
+            // Distinct telegram_id for the last seven days via distinct() + count()
             val dau = MessagesHistoryTable
-                .slice(MessagesHistoryTable.telegramId)
-                .select { MessagesHistoryTable.createdAt greaterEq sevenDaysAgo.atZone(ZoneOffset.UTC).toLocalDateTime() }
-                .withDistinct()
+                .slice(listOf(MessagesHistoryTable.telegramId))
+                .select(where = { MessagesHistoryTable.createdAt greaterEq sevenDaysAgo.atZone(ZoneOffset.UTC).toLocalDateTime() })
+                .distinct()
                 .count()
+                .toLong()
 
             AdminStats(
                 totalUsers = users,

@@ -6,8 +6,8 @@ import app.util.ClockProvider
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.select
-import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.update
 import java.time.Instant
 import java.time.ZoneOffset
 
@@ -45,7 +45,7 @@ class UserService {
 
     suspend fun findUser(telegramId: Long): UserProfile? {
         return DatabaseFactory.dbQuery {
-            UsersTable.select { UsersTable.telegramId eq telegramId }
+            UsersTable.select(where = { UsersTable.telegramId eq telegramId })
                 .limit(1)
                 .map(::toUser)
                 .firstOrNull()
@@ -54,7 +54,7 @@ class UserService {
 
     suspend fun listAllUserIds(): List<Long> {
         return DatabaseFactory.dbQuery {
-            UsersTable.slice(UsersTable.telegramId)
+            UsersTable.slice(listOf(UsersTable.telegramId))
                 .selectAll()
                 .map { it[UsersTable.telegramId] }
         }
