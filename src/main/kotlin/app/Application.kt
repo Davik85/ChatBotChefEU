@@ -93,6 +93,15 @@ fun Application.module(
         get("/health") {
             call.respondText("OK")
         }
+        get("/diag/echo") {
+            call.respond(
+                mapOf(
+                    "parse_mode" to appConfig.telegram.parseMode.name,
+                    "webhook_url" to appConfig.telegram.webhookUrl,
+                    "env_loaded" to (System.getenv("TELEGRAM_BOT_TOKEN")?.isNotBlank() == true)
+                )
+            )
+        }
         post("/telegram/webhook") {
             val secret = call.request.headers["X-Telegram-Bot-Api-Secret-Token"]
             val expectedSecret = appConfig.telegram.secretToken

@@ -3,7 +3,6 @@ package app.services
 import app.BillingConfig
 import app.I18n
 import app.LanguageMenu
-import app.SendMessageRequest
 import app.Update
 import app.openai.ChatMessage
 import app.openai.OpenAIClient
@@ -73,21 +72,18 @@ class UpdateProcessor(
         userService.updateLanguage(userId, languageCode)
         val confirmation = i18n.translate(languageCode, "language_saved")
         telegramService.answerCallback(callbackId, confirmation)
-        val followUp = SendMessageRequest(chatId = chatId, text = confirmation)
-        telegramService.sendMessage(followUp)
+        telegramService.safeSendMessage(chatId, confirmation)
     }
 
     private suspend fun handleStart(chatId: Long, language: String) {
         val text = i18n.translate(language, "start_message")
         val menuText = i18n.translate(language, "choose_language")
-        val request = SendMessageRequest(chatId = chatId, text = "$text\n\n$menuText", replyMarkup = LanguageMenu.buildMenu())
-        telegramService.sendMessage(request)
+        telegramService.safeSendMessage(chatId, "$text\n\n$menuText")
     }
 
     private suspend fun handleLanguageMenu(chatId: Long, language: String) {
         val text = i18n.translate(language, "choose_language")
-        val request = SendMessageRequest(chatId = chatId, text = text, replyMarkup = LanguageMenu.buildMenu())
-        telegramService.sendMessage(request)
+        telegramService.safeSendMessage(chatId, text, LanguageMenu.buildMenu())
     }
 
     private suspend fun handlePremiumStatus(chatId: Long, userId: Long, language: String) {
@@ -97,7 +93,7 @@ class UpdateProcessor(
         } else {
             i18n.translate(language, "premium_status_inactive")
         }
-        telegramService.sendMessage(SendMessageRequest(chatId = chatId, text = response))
+        telegramService.safeSendMessage(chatId, response)
     }
 
     private suspend fun handleGrantPremium(requesterId: Long, text: String, language: String, chatId: Long) {
@@ -118,7 +114,7 @@ class UpdateProcessor(
         }
         val expiry = premiumService.grantPremium(targetId, days)
         val message = i18n.translate(language, "premium_granted", mapOf("date" to DATE_FORMATTER.format(expiry)))
-        telegramService.sendMessage(SendMessageRequest(chatId = chatId, text = message))
+        telegramService.safeSendMessage(chatId, message)
     }
 
     private suspend fun handleAdminStats(requesterId: Long, chatId: Long, language: String) {
@@ -136,7 +132,7 @@ class UpdateProcessor(
                 "dau" to stats.dau7.toString()
             )
         )
-        telegramService.sendMessage(SendMessageRequest(chatId = chatId, text = message))
+        telegramService.safeSendMessage(chatId, message)
     }
 
     private suspend fun handleBroadcast(requesterId: Long, text: String, language: String, chatId: Long) {
@@ -167,7 +163,7 @@ class UpdateProcessor(
         val targetIds = userService.listAllUserIds()
         telegramService.broadcast(requesterId, targetIds, message, parseMode)
         val confirmation = i18n.translate(language, "broadcast_ack", mapOf("count" to targetIds.size.toString()))
-        telegramService.sendMessage(SendMessageRequest(chatId = chatId, text = confirmation))
+        telegramService.safeSendMessage(chatId, confirmation)
     }
 
     private suspend fun handleContentMessage(userId: Long, chatId: Long, text: String, language: String) {
@@ -184,7 +180,7 @@ class UpdateProcessor(
                         "duration" to billingConfig.premiumDurationDays.toString()
                     )
                 )
-                telegramService.sendMessage(SendMessageRequest(chatId = chatId, text = message))
+                telegramService.safeSendMessage(chatId, message)
                 return
             }
         }
@@ -212,12 +208,12 @@ class UpdateProcessor(
         } else {
             i18n.translate(language, "ai_error")
         }
-        telegramService.sendMessage(SendMessageRequest(chatId = chatId, text = responseText, parseMode = null))
+        telegramService.safeSendMessage(chatId, responseText)
         messageHistoryService.append(userId, ROLE_ASSISTANT, responseText)
     }
 
     private suspend fun sendText(chatId: Long, language: String, key: String) {
         val text = i18n.translate(language, key)
-        telegramService.sendMessage(SendMessageRequest(chatId = chatId, text = text))
+        telegramService.safeSendMessage(chatId, text)
     }
 }

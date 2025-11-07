@@ -17,11 +17,25 @@ data class DatabaseConfig(
     val idleTimeout: Duration = Duration.ofMinutes(10)
 )
 
+enum class TelegramParseMode {
+    NONE,
+    MARKDOWNV2,
+    HTML;
+
+    companion object {
+        fun fromEnv(raw: String?): TelegramParseMode {
+            val normalized = raw?.trim()?.takeIf { it.isNotEmpty() }?.uppercase()
+            return values().firstOrNull { it.name == normalized } ?: NONE
+        }
+    }
+}
+
 data class TelegramConfig(
     val botToken: String,
     val webhookUrl: String,
     val secretToken: String,
-    val adminIds: Set<Long>
+    val adminIds: Set<Long>,
+    val parseMode: TelegramParseMode
 )
 
 data class OpenAIConfig(
@@ -66,7 +80,8 @@ object Env {
             botToken = System.getenv("TELEGRAM_BOT_TOKEN").orEmpty(),
             webhookUrl = System.getenv("TELEGRAM_WEBHOOK_URL").orEmpty(),
             secretToken = System.getenv("TELEGRAM_SECRET_TOKEN").orEmpty(),
-            adminIds = adminIds
+            adminIds = adminIds,
+            parseMode = TelegramParseMode.fromEnv(System.getenv("PARSE_MODE"))
         )
 
         val openAI = OpenAIConfig(
