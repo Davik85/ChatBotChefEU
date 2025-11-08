@@ -1,5 +1,6 @@
 package app
 
+import java.io.File
 import java.math.BigDecimal
 import java.time.Duration
 
@@ -109,15 +110,21 @@ private fun dotEnvValue(key: String): String? = runCatching {
 
 private fun systemValue(key: String): String? = System.getenv(key).normalized()
 
+private val dotEnvTransport: String? by lazy { dotEnvValue("TELEGRAM_TRANSPORT")?.uppercase() }
+private val dotEnvAppEnv: String? by lazy { dotEnvValue("APP_ENV")?.uppercase() }
+private val dotEnvFileExists: Boolean by lazy { runCatching { File(".env").exists() }.getOrDefault(false) }
+
 private val shouldUseDotEnv: Boolean by lazy {
-    val transport = systemValue("TELEGRAM_TRANSPORT")?.uppercase()
-    val appEnv = systemValue("APP_ENV")?.uppercase()
-    if (transport == "LONG_POLLING" || appEnv == "DEV") {
-        true
-    } else {
-        val dotTransport = dotEnvValue("TELEGRAM_TRANSPORT")?.uppercase()
-        val dotAppEnv = dotEnvValue("APP_ENV")?.uppercase()
-        dotTransport == "LONG_POLLING" || dotAppEnv == "DEV"
+    val systemTransport = systemValue("TELEGRAM_TRANSPORT")?.uppercase()
+    val systemAppEnv = systemValue("APP_ENV")?.uppercase()
+
+    when {
+        systemTransport == "LONG_POLLING" -> true
+        systemAppEnv == "DEV" -> true
+        dotEnvTransport == "LONG_POLLING" -> true
+        dotEnvAppEnv == "DEV" -> true
+        dotEnvFileExists && !systemAppEnv.equals("PROD", ignoreCase = true) -> dotEnvInstance != null
+        else -> false
     }
 }
 
@@ -204,7 +211,7 @@ object Env {
 
 private fun ensureParentDirectory(path: String) {
     runCatching {
-        val parent = java.io.File(path).parentFile ?: return
+        val parent = File(path).parentFile ?: return
         if (!parent.exists()) {
             parent.mkdirs()
         }
@@ -216,7 +223,7 @@ private fun ensureDatabaseDirectory(jdbcUrl: String) {
     val dbPath = jdbcUrl.removePrefix("jdbc:sqlite:")
     if (dbPath.equals(":memory:", ignoreCase = true)) return
     runCatching {
-        val file = java.io.File(dbPath)
+        val file = File(dbPath)
         file.parentFile?.takeIf { !it.exists() }?.mkdirs()
     }
 }
