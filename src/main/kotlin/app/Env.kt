@@ -9,6 +9,9 @@ private const val DEFAULT_PREMIUM_DURATION_DAYS = 30L
 private const val DEFAULT_PREMIUM_PRICE = 6.99
 private const val DEFAULT_LOG_RETENTION_DAYS = 14L
 private const val REMINDER_FALLBACK = "2,1"
+private const val DEFAULT_POLL_INTERVAL_MS = 800L
+private const val DEFAULT_POLL_TIMEOUT_SEC = 40
+private const val DEFAULT_OFFSET_FILE = "/var/lib/chatbotchefeu/update_offset.dat"
 
 data class DatabaseConfig(
     val driver: String,
@@ -35,8 +38,24 @@ data class TelegramConfig(
     val webhookUrl: String,
     val secretToken: String,
     val adminIds: Set<Long>,
-    val parseMode: TelegramParseMode
+    val parseMode: TelegramParseMode,
+    val transport: BotTransport,
+    val pollIntervalMs: Long,
+    val pollTimeoutSec: Int,
+    val telegramOffsetFile: String
 )
+
+enum class BotTransport {
+    WEBHOOK,
+    LONG_POLLING;
+
+    companion object {
+        fun fromEnv(raw: String?): BotTransport {
+            val normalized = raw?.trim()?.takeIf { it.isNotEmpty() }?.uppercase()
+            return values().firstOrNull { it.name == normalized } ?: WEBHOOK
+        }
+    }
+}
 
 data class OpenAIConfig(
     val apiKey: String,
@@ -76,12 +95,25 @@ object Env {
         val reminderRaw = System.getenv("REMINDER_DAYS_BEFORE")?.takeIf { it.isNotBlank() } ?: REMINDER_FALLBACK
         val reminderDays = reminderRaw.split(",").mapNotNull { it.trim().toLongOrNull() }.sortedDescending()
 
+        val transport = BotTransport.fromEnv(System.getenv("TELEGRAM_TRANSPORT"))
+        val pollInterval = System.getenv("TELEGRAM_POLL_INTERVAL_MS")?.toLongOrNull() ?: DEFAULT_POLL_INTERVAL_MS
+        val pollTimeout = System.getenv("TELEGRAM_POLL_TIMEOUT_SEC")?.toIntOrNull() ?: DEFAULT_POLL_TIMEOUT_SEC
+        val offsetFile = System.getenv("TELEGRAM_OFFSET_FILE")
+            ?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_OFFSET_FILE
+
+        ensureParentDirectory(offsetFile)
+
         val telegram = TelegramConfig(
             botToken = System.getenv("TELEGRAM_BOT_TOKEN").orEmpty(),
             webhookUrl = System.getenv("TELEGRAM_WEBHOOK_URL").orEmpty(),
             secretToken = System.getenv("TELEGRAM_SECRET_TOKEN").orEmpty(),
             adminIds = adminIds,
-            parseMode = TelegramParseMode.fromEnv(System.getenv("PARSE_MODE"))
+            parseMode = TelegramParseMode.fromEnv(System.getenv("PARSE_MODE")),
+            transport = transport,
+            pollIntervalMs = pollInterval,
+            pollTimeoutSec = pollTimeout,
+            telegramOffsetFile = offsetFile
         )
 
         val openAI = OpenAIConfig(
@@ -113,5 +145,14 @@ object Env {
             billing = billing,
             logRetentionDays = logRetention
         )
+    }
+}
+
+private fun ensureParentDirectory(path: String) {
+    runCatching {
+        val parent = java.io.File(path).parentFile ?: return
+        if (!parent.exists()) {
+            parent.mkdirs()
+        }
     }
 }

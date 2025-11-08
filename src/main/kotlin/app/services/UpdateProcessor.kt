@@ -31,8 +31,8 @@ class UpdateProcessor(
     private val billingConfig: BillingConfig,
     private val adminService: AdminService,
     private val adminIds: Set<Long>
-) {
-    suspend fun handle(update: Update) {
+) : UpdateHandler {
+    override suspend fun handle(update: Update) {
         update.callbackQuery?.let { callback ->
             handleCallback(callback.id, callback.from.id, callback.data, callback.message?.chat?.id)
             return

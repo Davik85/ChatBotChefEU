@@ -100,13 +100,13 @@ The bot greets new users with inline buttons for English, Deutsch, Español, Ita
 - Admins (`ADMIN_IDS`) can grant premium via `/grantpremium <userId> <days>` and broadcast updates with optional Markdown/HTML rendering.
 - The reminder endpoint `/internal/housekeeping/reminders` dispatches renewal nudges `REMINDER_DAYS_BEFORE` days prior to expiry. Trigger it through the provided timer, cron, or any scheduler.
 
-## Long Polling Fallback
-
-Webhook mode is the default. To fall back to long polling:
-
-1. Disable the webhook with `setWebhook` and an empty URL.
-2. Replace the Netty `embeddedServer` invocation with a background polling coroutine (not implemented here) that calls `getUpdates`.
-3. Reuse `UpdateProcessor` for identical business logic.
+### Transport switch
+- WEBHOOK (prod): TELEGRAM_TRANSPORT=WEBHOOK
+  - Требуется: TELEGRAM_WEBHOOK_URL, TELEGRAM_SECRET_TOKEN, nginx proxy → http://127.0.0.1:8081
+- LONG_POLLING (dev/local): TELEGRAM_TRANSPORT=LONG_POLLING
+  - Рекоммендация: предварительно удалить вебхук:
+    curl -sS "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/deleteWebhook"
+  - Запуск локально: ./gradlew run
 
 ## Testing
 
