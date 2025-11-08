@@ -156,7 +156,7 @@ class UpdateProcessor(
             return
         }
         val parseMode = when (modeCandidate) {
-            "MARKDOWN" -> "Markdown"
+            "MARKDOWN" -> "MarkdownV2"
             "HTML" -> "HTML"
             else -> null
         }

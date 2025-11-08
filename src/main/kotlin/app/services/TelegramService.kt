@@ -25,7 +25,51 @@ class TelegramService(
 
     suspend fun sendMessage(request: SendMessageRequest) {
         val url = "$baseUrl/bot${config.botToken}/sendMessage"
-        executePost(url, request)
+        val params = mutableMapOf<String, Any>(
+            "chat_id" to request.chatId.toString(),
+            "text" to request.text,
+            "disable_web_page_preview" to request.disableWebPagePreview
+        )
+
+        request.replyMarkup?.let { params["reply_markup"] = it }
+
+        val hasEntities = !request.entities.isNullOrEmpty()
+        if (hasEntities) {
+            params.remove("parse_mode")
+            params["entities"] = request.entities!!
+        } else {
+            when (request.parseMode) {
+                "HTML", "MarkdownV2" -> params["parse_mode"] = request.parseMode
+            }
+        }
+
+        executePost(url, params)
+    }
+
+    suspend fun safeSendMessage(chatId: Long, text: String, markup: InlineKeyboardMarkup? = null) {
+        val (finalText, parseMode) = when (config.parseMode) {
+            TelegramParseMode.MARKDOWNV2 -> MarkdownV2Escaper.escape(text) to "MarkdownV2"
+            TelegramParseMode.HTML -> sanitizeHtml(text)
+            else -> text to null
+        }
+        val sanitizedMarkup = sanitizeMarkup(markup)
+        val request = SendMessageRequest(
+            chatId = chatId,
+            text = finalText,
+            parseMode = parseMode,
+            replyMarkup = sanitizedMarkup
+        )
+        sendMessage(request)
+    }
+
+    suspend fun notifyAdmins(text: String) {
+        config.adminIds.forEach { adminId ->
+            try {
+                safeSendMessage(adminId, text)
+            } catch (ex: Exception) {
+                logger.warn("Failed to notify admin {}: {}", adminId, ex.message)
+            }
+        }
     }
 
     suspend fun safeSendMessage(chatId: Long, text: String, markup: InlineKeyboardMarkup? = null) {
