@@ -1,6 +1,5 @@
 package app
 
-import app.BotTransport
 import app.db.DatabaseFactory
 import app.openai.OpenAIClient
 import app.services.*
@@ -24,13 +23,7 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
+import kotlinx.coroutines.*
 import org.slf4j.LoggerFactory
 
 private val logger = LoggerFactory.getLogger("app.Application")
@@ -40,7 +33,7 @@ fun main() {
     DatabaseFactory.init(config.database)
     val mapper = configuredMapper()
     val i18n = I18n.load(mapper)
-    val client = OkHttpClient.Builder().build()
+    val client = okhttp3.OkHttpClient.Builder().build()
     val telegramClient = TelegramClient(config.telegram, mapper, client)
     val telegramService = TelegramService(config.telegram, telegramClient)
     val premiumService = PremiumService(config.billing)
@@ -64,24 +57,32 @@ fun main() {
     val deduplicationService = DeduplicationService()
     val reminderService = ReminderService(config.billing, premiumService, userService, telegramService, i18n)
 
-    val longPollingRunner = if (config.telegram.transport == BotTransport.LONG_POLLING) {
-        LongPollingRunner(
+    // Кейс 1: Локальный запуск (long polling) — не стартуем HTTP сервер, а только polling loop
+    if (config.telegram.transport == BotTransport.LONG_POLLING) {
+        runCatching { telegramClient.deleteWebhook(dropPendingUpdates = false) }
+            .onFailure { logger.warn("Failed to delete webhook before starting long polling: {}", it.message) }
+        val pollingRunner = LongPollingRunner(
             tg = telegramClient,
             handler = updateProcessor,
             config = config.telegram,
             logger = LoggerFactory.getLogger(LongPollingRunner::class.java)
         )
-    } else {
-        null
+        runBlocking {
+            logger.info("Starting bot in LONG_POLLING mode (no Ktor HTTP server)")
+            pollingRunner.run()
+        }
+        return
     }
 
-    if (config.telegram.transport == BotTransport.LONG_POLLING) {
-        runCatching { telegramClient.deleteWebhook(dropPendingUpdates = false) }
-            .onFailure { logger.warn("Failed to delete webhook before starting long polling: {}", it.message) }
-    }
-
+    // Кейс 2: Production (webhook) — HTTP сервер + webhook endpoint
     embeddedServer(Netty, port = config.port) {
-        module(config, mapper, updateProcessor, deduplicationService, reminderService, longPollingRunner)
+        module(
+            config,
+            mapper,
+            updateProcessor,
+            deduplicationService,
+            reminderService
+        )
     }.start(wait = true)
 }
 
@@ -90,13 +91,10 @@ fun Application.module(
     mapper: ObjectMapper,
     updateProcessor: UpdateProcessor,
     deduplicationService: DeduplicationService,
-    reminderService: ReminderService,
-    longPollingRunner: LongPollingRunner?
+    reminderService: ReminderService
 ) {
     install(DefaultHeaders)
-    install(CallLogging) {
-        mdc("component") { "ktor" }
-    }
+    install(CallLogging) { mdc("component") { "ktor" } }
     install(ContentNegotiation) {
         jackson {
             configure(SerializationFeature.INDENT_OUTPUT, false)
@@ -111,28 +109,14 @@ fun Application.module(
     }
 
     val processingScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    var pollingJob: Job? = null
-
-    if (longPollingRunner != null) {
-        environment.monitor.subscribe(ApplicationStarted) {
-            pollingJob = processingScope.launch { longPollingRunner.run() }
-        }
-        environment.monitor.subscribe(ApplicationStopping) {
-            pollingJob?.cancel()
-        }
-    }
 
     environment.monitor.subscribe(ApplicationStopping) {
         processingScope.cancel()
     }
 
     routing {
-        get("/") {
-            call.respondText("ok")
-        }
-        get("/health") {
-            call.respondText("OK")
-        }
+        get("/") { call.respondText("ok") }
+        get("/health") { call.respondText("OK") }
         get("/diag/echo") {
             call.respond(
                 mapOf(
