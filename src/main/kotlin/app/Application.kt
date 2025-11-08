@@ -1,8 +1,11 @@
 package app
 
+import app.BotTransport
 import app.db.DatabaseFactory
 import app.openai.OpenAIClient
 import app.services.*
+import app.telegram.LongPollingRunner
+import app.telegram.TelegramClient
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
@@ -23,7 +26,9 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.slf4j.LoggerFactory
@@ -36,7 +41,8 @@ fun main() {
     val mapper = configuredMapper()
     val i18n = I18n.load(mapper)
     val client = OkHttpClient.Builder().build()
-    val telegramService = TelegramService(config.telegram, mapper, client)
+    val telegramClient = TelegramClient(config.telegram, mapper, client)
+    val telegramService = TelegramService(config.telegram, telegramClient)
     val premiumService = PremiumService(config.billing)
     val usageService = UsageService()
     val userService = UserService()
@@ -58,8 +64,24 @@ fun main() {
     val deduplicationService = DeduplicationService()
     val reminderService = ReminderService(config.billing, premiumService, userService, telegramService, i18n)
 
+    val longPollingRunner = if (config.telegram.transport == BotTransport.LONG_POLLING) {
+        LongPollingRunner(
+            tg = telegramClient,
+            handler = updateProcessor,
+            config = config.telegram,
+            logger = LoggerFactory.getLogger(LongPollingRunner::class.java)
+        )
+    } else {
+        null
+    }
+
+    if (config.telegram.transport == BotTransport.LONG_POLLING) {
+        runCatching { telegramClient.deleteWebhook(dropPendingUpdates = false) }
+            .onFailure { logger.warn("Failed to delete webhook before starting long polling: {}", it.message) }
+    }
+
     embeddedServer(Netty, port = config.port) {
-        module(config, mapper, updateProcessor, deduplicationService, reminderService)
+        module(config, mapper, updateProcessor, deduplicationService, reminderService, longPollingRunner)
     }.start(wait = true)
 }
 
@@ -68,7 +90,8 @@ fun Application.module(
     mapper: ObjectMapper,
     updateProcessor: UpdateProcessor,
     deduplicationService: DeduplicationService,
-    reminderService: ReminderService
+    reminderService: ReminderService,
+    longPollingRunner: LongPollingRunner?
 ) {
     install(DefaultHeaders)
     install(CallLogging) {
@@ -88,8 +111,25 @@ fun Application.module(
     }
 
     val processingScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    var pollingJob: Job? = null
+
+    if (longPollingRunner != null) {
+        environment.monitor.subscribe(ApplicationStarted) {
+            pollingJob = processingScope.launch { longPollingRunner.run() }
+        }
+        environment.monitor.subscribe(ApplicationStopping) {
+            pollingJob?.cancel()
+        }
+    }
+
+    environment.monitor.subscribe(ApplicationStopping) {
+        processingScope.cancel()
+    }
 
     routing {
+        get("/") {
+            call.respondText("ok")
+        }
         get("/health") {
             call.respondText("OK")
         }
@@ -97,33 +137,39 @@ fun Application.module(
             call.respond(
                 mapOf(
                     "parse_mode" to appConfig.telegram.parseMode.name,
+                    "transport" to appConfig.telegram.transport.name,
                     "webhook_url" to appConfig.telegram.webhookUrl,
                     "env_loaded" to (System.getenv("TELEGRAM_BOT_TOKEN")?.isNotBlank() == true)
                 )
             )
         }
-        post("/telegram/webhook") {
-            val secret = call.request.headers["X-Telegram-Bot-Api-Secret-Token"]
-            val expectedSecret = appConfig.telegram.secretToken
-            if (expectedSecret.isNotBlank() && secret != expectedSecret) {
-                logger.warn("Invalid secret token received")
-                call.respond(HttpStatusCode.Forbidden)
-                return@post
-            }
-            val payload = call.receiveText()
-            val update = runCatching { mapper.readValue(payload, Update::class.java) }
-                .onFailure { logger.warn("Failed to parse update: {}", it.message) }
-                .getOrNull()
-            call.respond(HttpStatusCode.OK) // быстрый ACK
-            if (update == null) return@post
-            processingScope.launch {
-                val processed = deduplicationService.markProcessed(update.updateId)
-                if (!processed) {
-                    logger.debug("Duplicate update {} ignored", update.updateId)
-                    return@launch
+        if (appConfig.telegram.transport == BotTransport.WEBHOOK) {
+            post("/telegram/webhook") {
+                val secret = call.request.headers["X-Telegram-Bot-Api-Secret-Token"]
+                val expectedSecret = appConfig.telegram.secretToken
+                if (expectedSecret.isNotBlank() && secret != expectedSecret) {
+                    logger.warn("Invalid Telegram secret token received")
+                    call.respond(HttpStatusCode.Unauthorized)
+                    return@post
                 }
-                runCatching { updateProcessor.handle(update) }
-                    .onFailure { logger.error("Failed to handle update {}", update.updateId, it) }
+                val payload = call.receiveText()
+                val update = runCatching { mapper.readValue(payload, Update::class.java) }
+                    .onFailure { logger.warn("Failed to parse update: {}", it.message) }
+                    .getOrNull()
+                if (update == null) {
+                    call.respond(HttpStatusCode.OK)
+                    return@post
+                }
+                processingScope.launch {
+                    val processed = deduplicationService.markProcessed(update.updateId)
+                    if (!processed) {
+                        logger.debug("Duplicate update {} ignored", update.updateId)
+                        return@launch
+                    }
+                    runCatching { updateProcessor.handle(update) }
+                        .onFailure { logger.error("Failed to handle update {}", update.updateId, it) }
+                }
+                call.respond(HttpStatusCode.OK)
             }
         }
         post("/internal/housekeeping/reminders") {

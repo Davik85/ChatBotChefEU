@@ -69,15 +69,6 @@ data class InlineKeyboardButton(
     @JsonProperty("callback_data") val callbackData: String
 )
 
-data class SendMessageRequest(
-    @JsonProperty("chat_id") val chatId: Long,
-    val text: String,
-    @JsonProperty("parse_mode") val parseMode: String? = null,
-    val entities: List<MessageEntity>? = null,
-    @JsonProperty("reply_markup") val replyMarkup: InlineKeyboardMarkup? = null,
-    @JsonProperty("disable_web_page_preview") val disableWebPagePreview: Boolean = true
-)
-
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class TelegramResponse<T>(
     val ok: Boolean,
