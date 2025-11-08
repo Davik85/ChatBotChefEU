@@ -3,6 +3,7 @@ package app.services
 import app.TelegramConfig
 import app.SendMessageRequest
 import app.InlineKeyboardMarkup
+import app.InlineKeyboardButton
 import app.TelegramParseMode
 import app.telegram.MarkdownV2Escaper
 import app.util.SecretMasker
@@ -107,7 +108,7 @@ class TelegramService(
             val responseBody = response.body?.string().orEmpty()
             val safeUrl = url.replace(config.botToken, SecretMasker.mask(config.botToken))
             if (!response.isSuccessful) {
-                logTelegramError(response.code, safeUrl, responseBody)
+                logTelegramApiError(response.code, safeUrl, responseBody)
                 return
             }
             val parsed = runCatching { mapper.readTree(responseBody) }.getOrNull()
@@ -126,34 +127,7 @@ class TelegramService(
                     responseBody
                 )
             }
-            filteredButtons.takeIf { it.isNotEmpty() }
         }
-        return filteredRows.takeIf { it.isNotEmpty() }?.let { InlineKeyboardMarkup(it) }
-    }
-
-    private fun logTelegramError(statusCode: Int, url: String, responseBody: String) {
-        val parsed = runCatching { mapper.readTree(responseBody) }.getOrNull()
-        if (parsed == null) {
-            logger.warn(
-                "Telegram API error: status={} url={} body={}",
-                statusCode,
-                url,
-                responseBody
-            )
-            return
-        }
-        val errorCode = parsed.get("error_code")?.asInt()
-        val description = parsed.get("description")?.asText()
-        val parameters = parsed.get("parameters")
-        logger.warn(
-            "Telegram API error: status={} url={} error_code={} description={} parameters={} body={}",
-            statusCode,
-            url,
-            errorCode,
-            description,
-            parameters,
-            responseBody
-        )
     }
 
     private fun sanitizeHtml(text: String): Pair<String, String?> {
@@ -167,16 +141,19 @@ class TelegramService(
 
     private fun sanitizeMarkup(markup: InlineKeyboardMarkup?): InlineKeyboardMarkup? {
         if (markup == null) return null
-        val filteredRows = markup.inlineKeyboard.mapNotNull { row ->
-            val filteredButtons = row.filter { button ->
+        val normalizedRows = mutableListOf<List<InlineKeyboardButton>>()
+        markup.inlineKeyboard.forEach { row ->
+            val sanitizedButtons = row.filter { button ->
                 button.text.isNotBlank() && button.callbackData.isNotBlank()
             }
-            filteredButtons.takeIf { it.isNotEmpty() }
+            if (sanitizedButtons.isNotEmpty()) {
+                normalizedRows += sanitizedButtons
+            }
         }
-        return filteredRows.takeIf { it.isNotEmpty() }?.let { InlineKeyboardMarkup(it) }
+        return if (normalizedRows.isEmpty()) null else InlineKeyboardMarkup(normalizedRows)
     }
 
-    private fun logTelegramError(statusCode: Int, url: String, responseBody: String) {
+    private fun logTelegramApiError(statusCode: Int, url: String, responseBody: String) {
         val parsed = runCatching { mapper.readTree(responseBody) }.getOrNull()
         if (parsed == null) {
             logger.warn(
