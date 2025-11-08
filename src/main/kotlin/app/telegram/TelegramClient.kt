@@ -15,7 +15,7 @@ import org.slf4j.LoggerFactory
 private val MEDIA_TYPE_JSON = "application/json; charset=utf-8".toMediaType()
 private const val MAX_LOG_TEXT_LENGTH = 1000
 
-enum class ParseMode { HTML, MARKDOWN_V2 }
+enum class ParseMode { HTML, MARKDOWN }
 
 data class OutMessage(
     val chatId: Long,
@@ -179,16 +179,13 @@ class TelegramClient(
 internal fun buildSendMessageParams(m: OutMessage): Map<String, Any> {
     val params = mutableMapOf<String, Any>(
         "chat_id" to m.chatId,
-        "text" to when (m.parseMode) {
-            ParseMode.MARKDOWN_V2 -> escapeMarkdownV2(m.text)
-            else -> m.text
-        }
+        "text" to m.text
     )
 
     if (m.entities.isNullOrEmpty()) {
         when (m.parseMode) {
             ParseMode.HTML -> params["parse_mode"] = "HTML"
-            ParseMode.MARKDOWN_V2 -> params["parse_mode"] = "MarkdownV2"
+            ParseMode.MARKDOWN -> params["parse_mode"] = "Markdown"
             null -> {
                 // no-op
             }
@@ -202,5 +199,3 @@ internal fun buildSendMessageParams(m: OutMessage): Map<String, Any> {
 
     return params
 }
-
-private fun escapeMarkdownV2(text: String): String = MarkdownV2Escaper.escape(text)

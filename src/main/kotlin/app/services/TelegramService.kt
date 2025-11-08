@@ -21,7 +21,7 @@ class TelegramService(
 
     suspend fun safeSendMessage(chatId: Long, text: String, markup: InlineKeyboardMarkup? = null) {
         val (finalText, parseMode) = when (config.parseMode) {
-            TelegramParseMode.MARKDOWNV2 -> text to ParseMode.MARKDOWN_V2
+            TelegramParseMode.MARKDOWN -> text to ParseMode.MARKDOWN
             TelegramParseMode.HTML -> sanitizeHtml(text)
             else -> text to null
         }
@@ -56,9 +56,9 @@ class TelegramService(
             val outbound = OutMessage(
                 chatId = chatId,
                 text = message,
-                parseMode = when (parseMode) {
+                parseMode = when (parseMode?.uppercase()) {
                     "HTML" -> ParseMode.HTML
-                    "MarkdownV2" -> ParseMode.MARKDOWN_V2
+                    "MARKDOWN" -> ParseMode.MARKDOWN
                     else -> null
                 },
                 disableWebPagePreview = true

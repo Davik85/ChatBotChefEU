@@ -71,6 +71,8 @@ dependencies {
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:$junitVersion")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.3.1")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+
+    runtimeOnly("io.github.cdimascio:dotenv-kotlin:6.4.1")
 }
 
 application { mainClass.set("app.ApplicationKt") }
