@@ -126,7 +126,34 @@ class TelegramService(
                     responseBody
                 )
             }
+            filteredButtons.takeIf { it.isNotEmpty() }
         }
+        return filteredRows.takeIf { it.isNotEmpty() }?.let { InlineKeyboardMarkup(it) }
+    }
+
+    private fun logTelegramError(statusCode: Int, url: String, responseBody: String) {
+        val parsed = runCatching { mapper.readTree(responseBody) }.getOrNull()
+        if (parsed == null) {
+            logger.warn(
+                "Telegram API error: status={} url={} body={}",
+                statusCode,
+                url,
+                responseBody
+            )
+            return
+        }
+        val errorCode = parsed.get("error_code")?.asInt()
+        val description = parsed.get("description")?.asText()
+        val parameters = parsed.get("parameters")
+        logger.warn(
+            "Telegram API error: status={} url={} error_code={} description={} parameters={} body={}",
+            statusCode,
+            url,
+            errorCode,
+            description,
+            parameters,
+            responseBody
+        )
     }
 
     private fun sanitizeHtml(text: String): Pair<String, String?> {
