@@ -73,6 +73,7 @@ data class SendMessageRequest(
     @JsonProperty("chat_id") val chatId: Long,
     val text: String,
     @JsonProperty("parse_mode") val parseMode: String? = null,
+    val entities: List<MessageEntity>? = null,
     @JsonProperty("reply_markup") val replyMarkup: InlineKeyboardMarkup? = null,
     @JsonProperty("disable_web_page_preview") val disableWebPagePreview: Boolean = true
 )
