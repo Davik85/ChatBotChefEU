@@ -31,45 +31,23 @@ class TelegramService(
             "disable_web_page_preview" to request.disableWebPagePreview
         )
 
+        val normalizedParseMode = request.parseMode
+            ?.trim()
+            ?.takeIf { it.equals("HTML", ignoreCase = true) || it.equals("MarkdownV2", ignoreCase = true) }
+            ?.let { if (it.equals("HTML", ignoreCase = true)) "HTML" else "MarkdownV2" }
+
+        if (normalizedParseMode != null) {
+            params["parse_mode"] = normalizedParseMode
+        }
+
+        if (!request.entities.isNullOrEmpty()) {
+            params.remove("parse_mode")
+            params["entities"] = request.entities
+        }
+
         request.replyMarkup?.let { params["reply_markup"] = it }
 
-        val hasEntities = !request.entities.isNullOrEmpty()
-        if (hasEntities) {
-            params.remove("parse_mode")
-            params["entities"] = request.entities!!
-        } else {
-            when (request.parseMode) {
-                "HTML", "MarkdownV2" -> params["parse_mode"] = request.parseMode
-            }
-        }
-
         executePost(url, params)
-    }
-
-    suspend fun safeSendMessage(chatId: Long, text: String, markup: InlineKeyboardMarkup? = null) {
-        val (finalText, parseMode) = when (config.parseMode) {
-            TelegramParseMode.MARKDOWNV2 -> MarkdownV2Escaper.escape(text) to "MarkdownV2"
-            TelegramParseMode.HTML -> sanitizeHtml(text)
-            else -> text to null
-        }
-        val sanitizedMarkup = sanitizeMarkup(markup)
-        val request = SendMessageRequest(
-            chatId = chatId,
-            text = finalText,
-            parseMode = parseMode,
-            replyMarkup = sanitizedMarkup
-        )
-        sendMessage(request)
-    }
-
-    suspend fun notifyAdmins(text: String) {
-        config.adminIds.forEach { adminId ->
-            try {
-                safeSendMessage(adminId, text)
-            } catch (ex: Exception) {
-                logger.warn("Failed to notify admin {}: {}", adminId, ex.message)
-            }
-        }
     }
 
     suspend fun safeSendMessage(chatId: Long, text: String, markup: InlineKeyboardMarkup? = null) {
@@ -148,7 +126,34 @@ class TelegramService(
                     responseBody
                 )
             }
+            filteredButtons.takeIf { it.isNotEmpty() }
         }
+        return filteredRows.takeIf { it.isNotEmpty() }?.let { InlineKeyboardMarkup(it) }
+    }
+
+    private fun logTelegramError(statusCode: Int, url: String, responseBody: String) {
+        val parsed = runCatching { mapper.readTree(responseBody) }.getOrNull()
+        if (parsed == null) {
+            logger.warn(
+                "Telegram API error: status={} url={} body={}",
+                statusCode,
+                url,
+                responseBody
+            )
+            return
+        }
+        val errorCode = parsed.get("error_code")?.asInt()
+        val description = parsed.get("description")?.asText()
+        val parameters = parsed.get("parameters")
+        logger.warn(
+            "Telegram API error: status={} url={} error_code={} description={} parameters={} body={}",
+            statusCode,
+            url,
+            errorCode,
+            description,
+            parameters,
+            responseBody
+        )
     }
 
     private fun sanitizeHtml(text: String): Pair<String, String?> {
