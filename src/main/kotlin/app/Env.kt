@@ -34,10 +34,10 @@ data class EnvMetadata(
         else -> EnvSourceSummary.SYSTEM
     }
 
-    val primarySourceLabel: String = if (summary == EnvSourceSummary.SYSTEM) {
-        EnvSourceSummary.SYSTEM.name
-    } else {
-        EnvSourceSummary.DOTENV.name
+    val primarySourceLabel: String = when {
+        hasSystem -> EnvSourceSummary.SYSTEM.name
+        hasDotEnv -> EnvSourceSummary.DOTENV.name
+        else -> EnvSourceSummary.SYSTEM.name
     }
 
     fun logSources() {
