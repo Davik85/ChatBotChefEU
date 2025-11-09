@@ -62,6 +62,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("ch.qos.logback:logback-classic:$logbackVersion")
     implementation("io.micrometer:micrometer-registry-prometheus:1.12.5")
+    implementation("io.github.cdimascio:dotenv-kotlin:6.4.1")
 
     // Tests
     testImplementation(kotlin("test"))
@@ -90,3 +91,9 @@ tasks.processResources {
 }
 
 tasks.test { useJUnitPlatform() }
+
+tasks.register<JavaExec>("runLocal") {
+    group = "application"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("app.ApplicationKt")
+}

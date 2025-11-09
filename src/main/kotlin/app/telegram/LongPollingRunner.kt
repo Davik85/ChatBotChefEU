@@ -19,9 +19,10 @@ class LongPollingRunner(
 
     suspend fun run() = coroutineScope {
         logger.info(
-            "LongPolling: started with timeout={}s interval={}ms",
+            "LongPolling: started with timeout={}s interval={}ms offsetFile={}",
             config.pollTimeoutSec,
-            config.pollIntervalMs
+            config.pollIntervalMs,
+            config.telegramOffsetFile
         )
         while (isActive) {
             try {
@@ -33,8 +34,7 @@ class LongPollingRunner(
                     processUpdates(updates)
                 }
             } catch (e: Exception) {
-                logger.warn("LongPolling: cycle error: {}", e.message)
-                delay(1000)
+                logger.warn("LongPolling: cycle error", e)
             }
             delay(config.pollIntervalMs)
         }
