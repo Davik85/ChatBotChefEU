@@ -1,5 +1,9 @@
 package app
 
+import app.EnvMetadata
+import app.BotTransport
+import app.TelegramConfig
+import app.TelegramParseMode
 import app.db.DatabaseFactory
 import app.openai.OpenAIClient
 import app.services.AdminService
@@ -11,6 +15,7 @@ import app.services.TelegramService
 import app.services.UpdateProcessor
 import app.services.UsageService
 import app.services.UserService
+import app.telegram.TelegramClient
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -43,7 +48,12 @@ class WebhookSmokeTest {
                 botToken = "test-token",
                 webhookUrl = "https://example.com",
                 secretToken = "secret",
-                adminIds = emptySet()
+                adminIds = emptySet(),
+                parseMode = TelegramParseMode.NONE,
+                transport = BotTransport.WEBHOOK,
+                pollIntervalMs = 800L,
+                pollTimeoutSec = 40,
+                telegramOffsetFile = "./.run/test_offset.dat"
             ),
             openAI = OpenAIConfig(
                 apiKey = "",
@@ -61,7 +71,8 @@ class WebhookSmokeTest {
                 premiumDurationDays = 30,
                 reminderDays = listOf(2, 1)
             ),
-            logRetentionDays = 7
+            logRetentionDays = 7,
+            environment = "PROD"
         )
         DatabaseFactory.init(appConfig.database)
         mockServer = MockWebServer()
@@ -75,12 +86,13 @@ class WebhookSmokeTest {
 
     @Test
     fun `health and webhook respond`() = testApplication {
-        val telegramService = TelegramService(
+        val telegramClient = TelegramClient(
             config = appConfig.telegram,
             mapper = mapper,
             client = OkHttpClient(),
             baseUrl = mockServer.url("/").toString().trimEnd('/')
         )
+        val telegramService = TelegramService(appConfig.telegram, telegramClient)
         val i18n = I18n.load(mapper)
         val premiumService = PremiumService(appConfig.billing)
         val usageService = UsageService()
@@ -104,7 +116,7 @@ class WebhookSmokeTest {
         val reminder = ReminderService(appConfig.billing, premiumService, userService, telegramService, i18n)
 
         application {
-            module(appConfig, mapper, updateProcessor, dedup, reminder)
+            module(appConfig, EnvMetadata(emptyMap(), emptyMap()), mapper, updateProcessor, dedup, reminder)
         }
 
         val health = client.get("/health")
