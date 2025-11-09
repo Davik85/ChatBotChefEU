@@ -3,6 +3,7 @@ package app.services
 import app.BillingConfig
 import app.I18n
 import app.LanguageMenu
+import app.TelegramParseMode
 import app.Update
 import app.openai.ChatMessage
 import app.openai.OpenAIClient
@@ -156,8 +157,8 @@ class UpdateProcessor(
             return
         }
         val parseMode = when (modeCandidate) {
-            "MARKDOWN" -> "MarkdownV2"
-            "HTML" -> "HTML"
+            "MARKDOWN" -> TelegramParseMode.MARKDOWN
+            "HTML" -> TelegramParseMode.HTML
             else -> null
         }
         val targetIds = userService.listAllUserIds()

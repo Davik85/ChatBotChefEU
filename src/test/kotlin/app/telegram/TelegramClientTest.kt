@@ -26,17 +26,17 @@ class TelegramClientTest {
     }
 
     @Test
-    fun `build params with Markdown parse mode escapes text`() {
+    fun `build params with Markdown parse mode`() {
         val message = OutMessage(
             chatId = 456L,
             text = "Hello _World_!",
-            parseMode = ParseMode.MARKDOWN_V2
+            parseMode = ParseMode.MARKDOWN
         )
 
         val params = buildSendMessageParams(message)
 
-        assertEquals("Hello \\_World\\_\\!", params["text"])
-        assertEquals("MarkdownV2", params["parse_mode"])
+        assertEquals("Hello _World_!", params["text"])
+        assertEquals("Markdown", params["parse_mode"])
         assertFalse(params.containsKey("entities"))
     }
 
