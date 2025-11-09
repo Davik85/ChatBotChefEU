@@ -50,15 +50,15 @@ class TelegramService(
         telegramClient.answerCallback(callbackId, text)
     }
 
-    suspend fun broadcast(adminId: Long, targetIds: List<Long>, message: String, parseMode: String?) {
+    suspend fun broadcast(adminId: Long, targetIds: List<Long>, message: String, parseMode: TelegramParseMode?) {
         logger.info("Admin {} triggered broadcast to {} users", adminId, targetIds.size)
         targetIds.forEach { chatId ->
             val outbound = OutMessage(
                 chatId = chatId,
                 text = message,
-                parseMode = when (parseMode?.uppercase()) {
-                    "HTML" -> ParseMode.HTML
-                    "MARKDOWN" -> ParseMode.MARKDOWN
+                parseMode = when (parseMode) {
+                    TelegramParseMode.HTML -> ParseMode.HTML
+                    TelegramParseMode.MARKDOWN -> ParseMode.MARKDOWN
                     else -> null
                 },
                 disableWebPagePreview = true

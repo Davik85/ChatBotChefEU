@@ -1,5 +1,6 @@
 package app
 
+import app.EnvMetadata
 import app.db.DatabaseFactory
 import app.openai.OpenAIClient
 import app.services.*
@@ -29,7 +30,17 @@ import org.slf4j.LoggerFactory
 private val logger = LoggerFactory.getLogger("app.Application")
 
 fun main() {
-    val config = Env.load()
+    val loadedEnv = Env.load()
+    val config = loadedEnv.config
+
+    println("=== START MODE: ${config.telegram.transport} (env via ${loadedEnv.metadata.primarySourceLabel})")
+    loadedEnv.metadata.logSources()
+
+    if (config.telegram.botToken.isBlank()) {
+        logger.error("Telegram bot token is empty. Shutting down.")
+        return
+    }
+
     DatabaseFactory.init(config.database)
     val mapper = configuredMapper()
     val i18n = I18n.load(mapper)
@@ -57,13 +68,11 @@ fun main() {
     val deduplicationService = DeduplicationService()
     val reminderService = ReminderService(config.billing, premiumService, userService, telegramService, i18n)
 
-    // === DAVIK85 DEBUG: TELEGRAM_TRANSPORT = ${config.telegram.transport}
-    println("=== DAVIK85 DEBUG: TELEGRAM_TRANSPORT = ${config.telegram.transport}")
-
-    // Кейс 1: Локальный запуск (long polling) — НЕ стартуем HTTP сервер, только polling loop
     if (config.telegram.transport == BotTransport.LONG_POLLING) {
         runCatching { telegramClient.deleteWebhook(dropPendingUpdates = false) }
-            .onFailure { logger.warn("Failed to delete webhook before starting long polling: {}", it.message) }
+            .onFailure {
+                logger.warn("Failed to delete webhook before starting long polling: {}", it.message)
+            }
         val pollingRunner = LongPollingRunner(
             tg = telegramClient,
             handler = updateProcessor,
@@ -81,6 +90,7 @@ fun main() {
     embeddedServer(Netty, port = config.port) {
         module(
             config,
+            loadedEnv.metadata,
             mapper,
             updateProcessor,
             deduplicationService,
@@ -91,6 +101,7 @@ fun main() {
 
 fun Application.module(
     appConfig: AppConfig,
+    envMetadata: EnvMetadata,
     mapper: ObjectMapper,
     updateProcessor: UpdateProcessor,
     deduplicationService: DeduplicationService,
@@ -123,12 +134,31 @@ fun Application.module(
         get("/diag/echo") {
             call.respond(
                 mapOf(
-                    "parse_mode" to appConfig.telegram.parseMode.name,
                     "transport" to appConfig.telegram.transport.name,
+                    "parse_mode" to appConfig.telegram.parseMode.name,
                     "webhook_url" to appConfig.telegram.webhookUrl,
-                    "env_loaded" to (System.getenv("TELEGRAM_BOT_TOKEN")?.isNotBlank() == true)
+                    "env_source" to envMetadata.summary.name,
+                    "offset_file" to appConfig.telegram.telegramOffsetFile,
+                    "db_url" to appConfig.database.url
                 )
             )
+        }
+        if (appConfig.environment.equals("DEV", ignoreCase = true)) {
+            get("/diag/vars") {
+                call.respond(
+                    mapOf(
+                        "transport" to appConfig.telegram.transport.name,
+                        "parse_mode" to appConfig.telegram.parseMode.name,
+                        "poll_interval_ms" to appConfig.telegram.pollIntervalMs,
+                        "poll_timeout_sec" to appConfig.telegram.pollTimeoutSec,
+                        "webhook_url" to appConfig.telegram.webhookUrl,
+                        "env_source" to envMetadata.summary.name,
+                        "offset_file" to appConfig.telegram.telegramOffsetFile,
+                        "db_url" to appConfig.database.url,
+                        "app_env" to appConfig.environment
+                    )
+                )
+            }
         }
         if (appConfig.telegram.transport == BotTransport.WEBHOOK) {
             post("/telegram/webhook") {

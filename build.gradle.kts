@@ -90,3 +90,9 @@ tasks.processResources {
 }
 
 tasks.test { useJUnitPlatform() }
+
+tasks.register<JavaExec>("runLocal") {
+    group = "application"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("app.ApplicationKt")
+}
