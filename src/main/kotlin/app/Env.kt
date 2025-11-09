@@ -1,5 +1,6 @@
 package app
 
+import io.github.cdimascio.dotenv.Dotenv
 import java.io.File
 import java.math.BigDecimal
 import java.time.Duration
@@ -126,25 +127,18 @@ data class AppConfig(
     val environment: String
 )
 
-private val dotEnvInstance: Any? by lazy {
+private val dotEnv: Dotenv? by lazy {
     runCatching {
-        val klass = Class.forName("io.github.cdimascio.dotenv.Dotenv")
-        val builder = klass.getMethod("configure").invoke(null)
-        builder.javaClass.getMethod("ignoreIfMalformed").invoke(builder)
-        builder.javaClass.getMethod("ignoreIfMissing").invoke(builder)
-        builder.javaClass.getMethod("load").invoke(builder)
+        Dotenv.configure()
+            .ignoreIfMalformed()
+            .ignoreIfMissing()
+            .load()
     }.getOrNull()
 }
 
-private val dotEnvGetMethod by lazy {
-    dotEnvInstance?.javaClass?.getMethod("get", String::class.java)
-}
-
 private fun dotEnvValueRaw(key: String): String? = runCatching {
-    val instance = dotEnvInstance ?: return null
-    val method = dotEnvGetMethod ?: return null
-    (method.invoke(instance, key) as String?)?.normalized()
-}.getOrNull()
+    dotEnv?.get(key)
+}.getOrNull().normalized()
 
 private fun systemValue(key: String): String? = System.getenv(key).normalized()
 
