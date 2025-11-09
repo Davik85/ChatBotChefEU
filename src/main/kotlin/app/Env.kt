@@ -4,7 +4,7 @@ import java.io.File
 import java.math.BigDecimal
 import java.time.Duration
 
-private const val DEFAULT_PORT = 8080
+private const val DEFAULT_PORT = 8081
 private const val DEFAULT_FREE_LIMIT = 10
 private const val DEFAULT_PREMIUM_DURATION_DAYS = 30L
 private const val DEFAULT_PREMIUM_PRICE = 6.99

@@ -57,7 +57,10 @@ fun main() {
     val deduplicationService = DeduplicationService()
     val reminderService = ReminderService(config.billing, premiumService, userService, telegramService, i18n)
 
-    // Кейс 1: Локальный запуск (long polling) — не стартуем HTTP сервер, а только polling loop
+    // === DAVIK85 DEBUG: TELEGRAM_TRANSPORT = ${config.telegram.transport}
+    println("=== DAVIK85 DEBUG: TELEGRAM_TRANSPORT = ${config.telegram.transport}")
+
+    // Кейс 1: Локальный запуск (long polling) — НЕ стартуем HTTP сервер, только polling loop
     if (config.telegram.transport == BotTransport.LONG_POLLING) {
         runCatching { telegramClient.deleteWebhook(dropPendingUpdates = false) }
             .onFailure { logger.warn("Failed to delete webhook before starting long polling: {}", it.message) }
@@ -68,10 +71,10 @@ fun main() {
             logger = LoggerFactory.getLogger(LongPollingRunner::class.java)
         )
         runBlocking {
-            logger.info("Starting bot in LONG_POLLING mode (no Ktor HTTP server)")
+            logger.info("Running bot in LONG_POLLING mode (no HTTP server is started!)")
             pollingRunner.run()
         }
-        return
+        return // <--- вот этот return КРИТИЧЕН! Без него сервер продолжит запускаться!
     }
 
     // Кейс 2: Production (webhook) — HTTP сервер + webhook endpoint
