@@ -14,14 +14,21 @@ import java.time.ZoneOffset
 
 enum class ConversationState { AWAITING_GREETING }
 
-enum class BotMode {
-    NONE,
+enum class UIMode {
     RECIPES,
-    CALORIES,
-    PRODUCT_INFO;
+    CALORIE_CALCULATOR,
+    INGREDIENT_MACROS,
+    HELP;
 
     companion object {
-        fun fromRaw(raw: String?): BotMode? = raw?.let { runCatching { valueOf(it) }.getOrNull() }
+        fun fromRaw(raw: String?): UIMode? {
+            if (raw.isNullOrBlank()) return null
+            return when (raw) {
+                "CALORIES" -> CALORIE_CALCULATOR
+                "PRODUCT_INFO" -> INGREDIENT_MACROS
+                else -> runCatching { valueOf(raw) }.getOrNull()
+            }
+        }
     }
 }
 
@@ -30,7 +37,7 @@ data class UserProfile(
     val locale: String?,
     val conversationState: ConversationState?,
     val createdAt: Instant,
-    val mode: BotMode?
+    val mode: UIMode?
 )
 
 class UserService {
@@ -81,7 +88,7 @@ class UserService {
         }
     }
 
-    suspend fun getMode(telegramId: Long): BotMode? {
+    suspend fun getMode(telegramId: Long): UIMode? {
         val raw = DatabaseFactory.dbQuery {
             UsersTable.slice(UsersTable.mode)
                 .select { UsersTable.telegramId eq telegramId }
@@ -89,10 +96,10 @@ class UserService {
                 .map { it[UsersTable.mode] }
                 .firstOrNull()
         }
-        return BotMode.fromRaw(raw)
+        return UIMode.fromRaw(raw)
     }
 
-    suspend fun setMode(telegramId: Long, mode: BotMode?) {
+    suspend fun setMode(telegramId: Long, mode: UIMode?) {
         DatabaseFactory.dbQuery {
             UsersTable.update({ UsersTable.telegramId eq telegramId }) {
                 it[UsersTable.mode] = mode?.name
@@ -117,7 +124,7 @@ class UserService {
             locale = row[UsersTable.locale],
             conversationState = stateRaw?.let { runCatching { ConversationState.valueOf(it) }.getOrNull() },
             createdAt = created,
-            mode = BotMode.fromRaw(modeRaw)
+            mode = UIMode.fromRaw(modeRaw)
         )
     }
 

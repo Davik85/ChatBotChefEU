@@ -5,8 +5,10 @@ import app.db.MessagesHistoryTable
 import app.util.ClockProvider
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
+import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.select
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import java.time.Instant
 import java.time.ZoneOffset
 
@@ -32,6 +34,12 @@ class MessageHistoryService {
                 .limit(HISTORY_LIMIT)
                 .map(::toStoredMessage)
                 .reversed()
+        }
+    }
+
+    suspend fun clear(telegramId: Long) {
+        DatabaseFactory.dbQuery {
+            MessagesHistoryTable.deleteWhere { MessagesHistoryTable.telegramId eq telegramId }
         }
     }
 

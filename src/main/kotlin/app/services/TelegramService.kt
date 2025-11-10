@@ -4,15 +4,13 @@ import app.I18n
 import app.InlineKeyboardButton
 import app.InlineKeyboardMarkup
 import app.InputFile
-import app.KeyboardButton
 import app.LanguageSupport
-import app.ReplyKeyboardMarkup
-import app.ReplyKeyboardRemove
 import app.TelegramConfig
 import app.TelegramParseMode
 import app.telegram.OutMessage
 import app.telegram.ParseMode
 import app.telegram.TelegramClient
+import app.services.UIMode
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 import org.slf4j.LoggerFactory
@@ -99,25 +97,39 @@ class TelegramService(
         )
     )
 
-    fun mainMenu(language: String): ReplyKeyboardMarkup {
+    fun mainMenuInline(language: String): InlineKeyboardMarkup {
         val recipes = i18n.translate(language, "menu.btn.recipes")
-        val calories = i18n.translate(language, "menu.btn.calorie_calc")
-        val product = i18n.translate(language, "menu.btn.product_info")
+        val calorie = i18n.translate(language, "menu.btn.calorie")
+        val macros = i18n.translate(language, "menu.btn.macros")
         val help = i18n.translate(language, "menu.btn.help")
-        return ReplyKeyboardMarkup(
-            keyboard = listOf(
-                listOf(KeyboardButton(recipes)),
-                listOf(KeyboardButton(calories)),
-                listOf(KeyboardButton(product)),
-                listOf(KeyboardButton(help))
-            ),
-            resizeKeyboard = true,
-            oneTimeKeyboard = false,
-            selective = false
+        return InlineKeyboardMarkup(
+            listOf(
+                listOf(btn(recipes, "mode:${UIMode.RECIPES.name}"), btn(calorie, "mode:${UIMode.CALORIE_CALCULATOR.name}")),
+                listOf(btn(macros, "mode:${UIMode.INGREDIENT_MACROS.name}"), btn(help, "mode:${UIMode.HELP.name}"))
+            )
         )
     }
 
-    fun removeKeyboard(): ReplyKeyboardRemove = ReplyKeyboardRemove(removeKeyboard = true, selective = false)
+    suspend fun sendWelcomeWithMenu(chatId: Long, language: String) {
+        sendWelcomeImage(chatId)
+        val welcomeText = i18n.translate(language, "menu.start.welcome")
+        val markup = mainMenuInline(language)
+        runCatching { safeSendMessage(chatId, welcomeText, markup) }
+            .onFailure { logger.warn("Failed to send welcome text: {}", it.message) }
+    }
+
+    fun modeLabel(language: String, mode: UIMode): String = when (mode) {
+        UIMode.RECIPES -> i18n.translate(language, "menu.mode.recipes")
+        UIMode.CALORIE_CALCULATOR -> i18n.translate(language, "menu.mode.calorie")
+        UIMode.INGREDIENT_MACROS -> i18n.translate(language, "menu.mode.macros")
+        UIMode.HELP -> i18n.translate(language, "menu.mode.help")
+    }
+
+    suspend fun removeInlineKeyboard(chatId: Long, messageId: Long) {
+        val emptyMarkup = InlineKeyboardMarkup(emptyList())
+        runCatching { telegramClient.editMessageReplyMarkup(chatId, messageId, emptyMarkup) }
+            .onFailure { logger.warn("Failed to remove inline keyboard for chat={} message={}: {}", chatId, messageId, it.message) }
+    }
 
     suspend fun broadcast(adminId: Long, targetIds: List<Long>, message: String, parseMode: TelegramParseMode?) {
         logger.info("Admin {} triggered broadcast to {} users", adminId, targetIds.size)
