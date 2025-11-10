@@ -8,10 +8,12 @@ import app.Update
 import app.openai.ChatMessage
 import app.openai.OpenAIClient
 import app.prompts.Prompts
-import app.prompts.Prompts.Mode
+import app.services.ConversationMode
 import app.util.LanguageCallbackAction
 import app.util.detectLanguageByGreeting
 import app.util.parseLanguageCallbackData
+import app.util.MainMenuAction
+import app.util.parseMainMenuCallbackData
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -98,8 +100,9 @@ class UpdateProcessor(
         messageId: Long?
     ) {
         if (chatId == null || data.isNullOrBlank()) return
-        if (data.startsWith("MODE_")) {
-            handleModeCallback(callbackId, chatId, messageId, userId, data)
+        val mainMenuAction = parseMainMenuCallbackData(data)
+        if (mainMenuAction != null) {
+            handleMainMenuSelection(callbackId, chatId, messageId, userId, mainMenuAction)
             return
         }
         val action = parseLanguageCallbackData(data) ?: return
@@ -111,16 +114,17 @@ class UpdateProcessor(
     }
 
     private suspend fun handleStart(user: UserProfile, chatId: Long, language: String) {
-        telegramService.sendWelcomeWithMenu(chatId, language)
-        userService.updateActiveMode(user.telegramId, "RECIPES")
-        user.activeMode = "RECIPES"
+        userService.updateMode(user.telegramId, null)
+        user.mode = null
+        userService.updateConversationState(user.telegramId, null)
+        showMainMenu(user, chatId, language, includeImage = true)
         if (user.locale == null) {
             showLanguageMenu(chatId, language)
         }
     }
 
     private suspend fun handleHelp(chatId: Long, language: String) {
-        val helpText = i18n.translate(language, "help.text")
+        val helpText = i18n.translate(language, "mode.help.text")
         telegramService.safeSendMessage(chatId, helpText)
     }
 
@@ -152,7 +156,9 @@ class UpdateProcessor(
             telegramService.removeInlineKeyboard(chatId, messageId)
         }
         telegramService.safeSendMessage(chatId, confirmation)
-        telegramService.sendWelcomeWithMenu(chatId, responseLanguage)
+        userService.updateMode(user.telegramId, null)
+        user.mode = null
+        showMainMenu(user, chatId, responseLanguage, includeImage = true)
         userService.updateConversationState(user.telegramId, null)
         if (!alreadyActive) {
             userService.updateLocale(user.telegramId, locale)
@@ -197,7 +203,9 @@ class UpdateProcessor(
             userService.updateConversationState(user.telegramId, null)
             val unsupported = i18n.translate(fallback, "lang.other.unsupported")
             telegramService.safeSendMessage(chatId, unsupported)
-            telegramService.sendWelcomeWithMenu(chatId, fallback)
+            user.mode = null
+            userService.updateMode(user.telegramId, null)
+            showMainMenu(user, chatId, fallback, includeImage = true)
             logger.warn("Unsupported locale {} detected for user {}", detected, user.telegramId)
             return
         }
@@ -206,62 +214,90 @@ class UpdateProcessor(
         val responseLanguage = i18n.resolveLanguage(detected)
         val confirmation = i18n.translate(responseLanguage, "lang.other.confirm", mapOf("langName" to LanguageSupport.nativeName(detected)))
         telegramService.safeSendMessage(chatId, confirmation)
-        telegramService.sendWelcomeWithMenu(chatId, responseLanguage)
+        user.mode = null
+        userService.updateMode(user.telegramId, null)
+        showMainMenu(user, chatId, responseLanguage, includeImage = true)
         logger.info("Language for user {} set to {} via greeting", user.telegramId, detected)
     }
 
-    private suspend fun handleModeCallback(
+    private suspend fun handleMainMenuSelection(
         callbackId: String,
         chatId: Long,
         messageId: Long?,
         userId: Long,
-        data: String
+        action: MainMenuAction
     ) {
         val user = userService.ensureUser(userId, null)
         val language = i18n.resolveLanguage(user.locale)
-        when (data) {
-            "MODE_RECIPES" -> {
-                activateMode(callbackId, chatId, messageId, user, userId, language, "RECIPES", "mode.activated.recipes")
+        resetMenuIfNeeded(user, chatId, messageId)
+        user.lastMenuMessageId = null
+        userService.updateLastMenuMessageId(user.telegramId, null)
+        when (action) {
+            MainMenuAction.Recipes -> {
+                activateMode(callbackId, chatId, user, userId, language, ConversationMode.RECIPES, "mode.recipes.intro")
             }
-            "MODE_CALORIES" -> {
-                activateMode(callbackId, chatId, messageId, user, userId, language, "CALORIES", "mode.activated.calories")
+            MainMenuAction.Calorie -> {
+                activateMode(callbackId, chatId, user, userId, language, ConversationMode.CALORIE, "mode.calorie.intro")
             }
-            "MODE_INGREDIENT" -> {
-                activateMode(callbackId, chatId, messageId, user, userId, language, "INGREDIENT", "mode.activated.ingredient")
+            MainMenuAction.Ingredient -> {
+                activateMode(callbackId, chatId, user, userId, language, ConversationMode.INGREDIENT, "mode.ingredient.intro")
             }
-            "MODE_HELP" -> {
-                val toast = i18n.translate(language, "menu.help")
-                telegramService.answerCallback(callbackId, toast)
-                if (messageId != null) {
-                    telegramService.deleteMessage(chatId, messageId)
-                }
-                val helpText = i18n.translate(language, "help.text")
+            MainMenuAction.Help -> {
+                telegramService.answerCallback(callbackId, null)
+                val helpText = i18n.translate(language, "mode.help.text")
                 telegramService.safeSendMessage(chatId, helpText)
+                userService.updateMode(userId, null)
+                user.mode = null
+                showMainMenu(user, chatId, language, includeImage = false)
             }
-            else -> telegramService.answerCallback(callbackId, null)
         }
     }
 
     private suspend fun activateMode(
         callbackId: String,
         chatId: Long,
-        messageId: Long?,
         user: UserProfile,
         userId: Long,
         language: String,
-        modeValue: String,
-        confirmationKey: String
+        mode: ConversationMode,
+        introKey: String
     ) {
-        userService.updateActiveMode(userId, modeValue)
-        user.activeMode = modeValue
+        userService.updateMode(userId, mode)
+        user.mode = mode
+        userService.updateConversationState(userId, null)
         messageHistoryService.clear(userId)
-        logger.info("User {} switched to {}", userId, modeValue)
-        val confirmation = i18n.translate(language, confirmationKey)
-        telegramService.answerCallback(callbackId, confirmation)
-        if (messageId != null) {
-            telegramService.deleteMessage(chatId, messageId)
+        logger.info("User {} switched to {}", userId, mode)
+        telegramService.answerCallback(callbackId, null)
+        val intro = i18n.translate(language, introKey)
+        telegramService.safeSendMessage(chatId, intro)
+    }
+
+    private suspend fun showMainMenu(
+        user: UserProfile,
+        chatId: Long,
+        language: String,
+        includeImage: Boolean
+    ) {
+        resetMenuIfNeeded(user, chatId)
+        if (includeImage) {
+            telegramService.sendWelcomeImage(chatId)
         }
-        telegramService.safeSendMessage(chatId, confirmation)
+        val menuText = i18n.translate(language, "menu.main.title")
+        val messageId: Long? = try {
+            telegramService.sendMainMenu(chatId, menuText, language)
+        } catch (ex: Exception) {
+            logger.warn("Failed to send main menu", ex)
+            null
+        }
+        user.lastMenuMessageId = messageId
+        userService.updateLastMenuMessageId(user.telegramId, messageId)
+    }
+
+    private suspend fun resetMenuIfNeeded(user: UserProfile, chatId: Long, fallbackMessageId: Long? = null) {
+        val menuId = user.lastMenuMessageId ?: fallbackMessageId ?: return
+        telegramService.deleteMessage(chatId, menuId)
+        user.lastMenuMessageId = null
+        userService.updateLastMenuMessageId(user.telegramId, null)
     }
 
     private suspend fun showLanguageMenu(chatId: Long, language: String) {
@@ -356,18 +392,19 @@ class UpdateProcessor(
 
     private suspend fun handleContentMessage(user: UserProfile, chatId: Long, text: String, language: String) {
         val userId = user.telegramId
-        val storedMode = userService.getActiveMode(userId) ?: user.activeMode
-        val modeValue = storedMode ?: "RECIPES"
-        if (modeValue == "HELP") {
-            val helpText = i18n.translate(language, "help.text")
-            telegramService.safeSendMessage(chatId, helpText)
+        val activeMode = user.mode ?: userService.getMode(userId)
+        if (activeMode == null) {
+            showMainMenu(user, chatId, language, includeImage = false)
             return
         }
-
-        val mode = when (modeValue) {
-            "CALORIES" -> Mode.CALORIES
-            "INGREDIENT" -> Mode.INGREDIENT
-            else -> Mode.RECIPES
+        user.mode = activeMode
+        if (activeMode == ConversationMode.HELP) {
+            val helpText = i18n.translate(language, "mode.help.text")
+            telegramService.safeSendMessage(chatId, helpText)
+            userService.updateMode(userId, null)
+            user.mode = null
+            showMainMenu(user, chatId, language, includeImage = false)
+            return
         }
 
         val premium = premiumService.isPremiumActive(userId)
@@ -392,7 +429,7 @@ class UpdateProcessor(
         val history = messageHistoryService.loadRecent(userId)
         messageHistoryService.append(userId, ROLE_USER, text)
 
-        val systemPrompt = Prompts.system(mode, language)
+        val systemPrompt = Prompts.system(activeMode, language)
         val messages = buildList {
             add(ChatMessage(role = "system", content = systemPrompt))
             history.forEach { stored ->

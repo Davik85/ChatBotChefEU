@@ -4,6 +4,7 @@ import io.github.cdimascio.dotenv.Dotenv
 import java.io.File
 import java.math.BigDecimal
 import java.time.Duration
+import org.slf4j.LoggerFactory
 
 private const val DEFAULT_PORT = 8081
 private const val DEFAULT_FREE_LIMIT = 10
@@ -128,6 +129,8 @@ data class AppConfig(
     val environment: String
 )
 
+private val envLogger = LoggerFactory.getLogger("app.Env")
+
 private val dotEnv: Dotenv? by lazy {
     runCatching {
         Dotenv.configure()
@@ -137,15 +140,17 @@ private val dotEnv: Dotenv? by lazy {
     }.getOrNull()
 }
 
-private fun dotEnvValueRaw(key: String): String? = runCatching {
-    dotEnv?.get(key)
-}.getOrNull().normalized()
+private val dotEnvValues: Map<String, String?> by lazy {
+    dotEnv?.entries()?.associate { it.key to it.value } ?: emptyMap()
+}
+
+private fun dotEnvValueRaw(key: String): String? = dotEnvValues[key].normalized()
 
 private fun systemValue(key: String): String? = System.getenv(key).normalized()
 
 private fun String?.normalized(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
 
-private class EnvTracker(private val useDotEnv: Boolean) {
+private class EnvTracker {
     private val values = linkedMapOf<String, String?>()
     private val sources = linkedMapOf<String, ValueOrigin>()
 
@@ -155,12 +160,10 @@ private class EnvTracker(private val useDotEnv: Boolean) {
             record(key, system, ValueOrigin.SYSTEM)
             return system
         }
-        if (useDotEnv) {
-            val dotEnv = dotEnvValueRaw(key)
-            if (dotEnv != null) {
-                record(key, dotEnv, ValueOrigin.DOTENV)
-                return dotEnv
-            }
+        val dotEnv = dotEnvValueRaw(key)
+        if (dotEnv != null) {
+            record(key, dotEnv, ValueOrigin.DOTENV)
+            return dotEnv
         }
         val defaultValue = defaultProvider?.invoke()
         record(key, defaultValue, ValueOrigin.DEFAULT)
@@ -177,23 +180,11 @@ private class EnvTracker(private val useDotEnv: Boolean) {
 
 object Env {
     fun load(): LoadedEnv {
-        val systemTransport = systemValue("TELEGRAM_TRANSPORT")?.uppercase()
-        val systemAppEnv = systemValue("APP_ENV")?.uppercase()
-        val dotEnvTransport = dotEnvValueRaw("TELEGRAM_TRANSPORT")?.uppercase()
-        val dotEnvAppEnv = dotEnvValueRaw("APP_ENV")?.uppercase()
-
-        val allowDotEnv = when {
-            systemTransport == "LONG_POLLING" -> true
-            systemAppEnv == "DEV" -> true
-            dotEnvTransport == "LONG_POLLING" -> true
-            dotEnvAppEnv == "DEV" -> true
-            else -> false
-        }
-
-        val tracker = EnvTracker(allowDotEnv)
+        val tracker = EnvTracker()
 
         val port = tracker.get("PORT") { DEFAULT_PORT.toString() }?.toIntOrNull() ?: DEFAULT_PORT
         val transport = BotTransport.fromEnv(tracker.get("TELEGRAM_TRANSPORT"))
+        envLogger.info("Effective TELEGRAM_TRANSPORT={}", transport)
         val appEnv = tracker.get("APP_ENV") { "PROD" }!!.uppercase()
         val useDevDefaults = transport == BotTransport.LONG_POLLING || appEnv == "DEV"
 

@@ -15,7 +15,7 @@ ChatBotChefEU is a Kotlin/Ktor Telegram bot tailored for the EU market. It deliv
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in secrets:
+Copy `.env.example` to `.env` and fill in secrets. On startup the application loads variables from `.env` (if present) and then overrides them with `System.getenv()` values so that container/platform secrets always win.
 
 ```bash
 cp .env.example .env
@@ -23,7 +23,7 @@ cp .env.example .env
 
 Key variables:
 
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_SECRET_TOKEN`, `TELEGRAM_WEBHOOK_URL`
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_SECRET_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_TRANSPORT`
 - `OPENAI_API_KEY`, `OPENAI_MODEL`
 - Billing knobs: `FREE_TOTAL_MSG_LIMIT`, `PREMIUM_PRICE_EUR`, `PREMIUM_DURATION_DAYS`, `REMINDER_DAYS_BEFORE`
 - Database connection via `DB_DRIVER` and `DB_URL`
@@ -104,9 +104,16 @@ The bot greets new users with inline buttons for English, Deutsch, Español, Ita
 - WEBHOOK (prod): TELEGRAM_TRANSPORT=WEBHOOK
   - Требуется: TELEGRAM_WEBHOOK_URL, TELEGRAM_SECRET_TOKEN, nginx proxy → http://127.0.0.1:8081
 - LONG_POLLING (dev/local): TELEGRAM_TRANSPORT=LONG_POLLING
-  - Рекоммендация: предварительно удалить вебхук:
+  - Рекомендация: предварительно удалить вебхук:
     curl -sS "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/deleteWebhook"
-  - Запуск локально: ./gradlew run
+  - Запуск локально: `TELEGRAM_TRANSPORT=LONG_POLLING ./gradlew run`
+  - В этом режиме бот выключает Ktor и держит только цикл long-polling
+
+### Prompts
+
+Mode-specific system prompts live in `resources/prompts/*.prompt.md`. Update those markdown files to tweak the recipe, calorie calculator, ingredient macro, or help personas without recompiling the app.
+
+The `/start` welcome photo ships as a Base64-encoded JPEG in `resources/start_welcome.jpg.b64`. Replace the contents with your own image data or set `START_WELCOME_URL` in the environment to load a remote asset at runtime.
 
 ## Testing
 
