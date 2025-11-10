@@ -283,9 +283,12 @@ class UpdateProcessor(
             telegramService.sendWelcomeImage(chatId)
         }
         val menuText = i18n.translate(language, "menu.main.title")
-        val messageId = runCatching { telegramService.sendMainMenu(chatId, menuText, language) }
-            .onFailure { logger.warn("Failed to send main menu: {}", it.message) }
-            .getOrNull()
+        val messageId = try {
+            telegramService.sendMainMenu(chatId, menuText, language)
+        } catch (ex: Exception) {
+            logger.warn("Failed to send main menu", ex)
+            null
+        }
         user.lastMenuMessageId = messageId
         userService.updateLastMenuMessageId(user.telegramId, messageId)
     }
