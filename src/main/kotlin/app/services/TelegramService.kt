@@ -5,7 +5,6 @@ import app.InlineKeyboardButton
 import app.InlineKeyboardMarkup
 import app.InputFile
 import app.LanguageSupport
-import app.Message
 import app.TelegramConfig
 import app.TelegramParseMode
 import app.telegram.OutMessage
@@ -13,6 +12,7 @@ import app.telegram.ParseMode
 import app.telegram.TelegramClient
 import java.nio.charset.StandardCharsets
 import java.util.Base64
+import kotlin.coroutines.cancellation.CancellationException
 import org.slf4j.LoggerFactory
 
 class TelegramService(
@@ -25,36 +25,34 @@ class TelegramService(
 
     suspend fun safeSendMessage(chatId: Long, text: String, replyMarkup: Any? = null): Long? {
         val outbound = buildOutbound(chatId, text, replyMarkup)
-        telegramClient.sendMessage(outbound)
-        return TODO("Provide the return value")
-    }
-
-    suspend fun sendPhoto(chatId: Long, photo: InputFile, caption: String? = null, replyMarkup: Any? = null): Message? {
-        return telegramClient.sendPhoto(chatId, photo, caption, replyMarkup)
+        return try {
+            telegramClient.sendMessage(outbound)?.message_id
+                ?: run {
+                    logger.warn(
+                        "Telegram sendMessage returned null message_id for chat={} textPreview={}",
+                        chatId,
+                        preview(text)
+                    )
+                    null
+                }
+        } catch (ex: Exception) {
+            if (ex is CancellationException) throw ex
+            logger.warn("Failed to send message chat={} error={}", chatId, ex.message)
+            null
+        }
     }
 
     suspend fun sendWelcomeImage(chatId: Long): Long? {
         val url = welcomeImageUrl
         if (url != null) {
-            val message = runCatching { sendPhoto(chatId, InputFile.Url(url)) }
-                .onFailure { logger.warn("Failed to send welcome image from URL: {}", it.message) }
-                .getOrNull()
-            if (message != null) {
-                return message.message_id
-            }
+            safeSendPhoto(chatId, InputFile.Url(url))?.let { return it }
         }
         val resourceBytes = loadWelcomeResource()
         if (resourceBytes != null) {
-            val message = runCatching {
-                sendPhoto(
-                    chatId,
-                    InputFile.Bytes(filename = "welcome.jpg", bytes = resourceBytes, contentType = "image/jpeg")
-                )
-            }.onFailure { logger.warn("Failed to send welcome image from resources: {}", it.message) }
-                .getOrNull()
-            if (message != null) {
-                return message.message_id
-            }
+            return safeSendPhoto(
+                chatId,
+                InputFile.Bytes(filename = "welcome.jpg", bytes = resourceBytes, contentType = "image/jpeg")
+            )
         } else {
             logger.warn("Welcome image resource not found")
         }
@@ -72,7 +70,28 @@ class TelegramService(
     }
 
     suspend fun answerCallback(callbackId: String, text: String? = null) {
-        telegramClient.answerCallback(callbackId, text)
+        try {
+            val response = telegramClient.answerCallback(callbackId, text)
+            if (response == null) {
+                return
+            }
+            if (!response.ok) {
+                val description = response.description.orEmpty()
+                if (description.contains("query is too old", ignoreCase = true)) {
+                    logger.info("Callback {} ignored: query is too old", callbackId)
+                } else {
+                    logger.warn(
+                        "Failed to answer callback {}: description={} result={}",
+                        callbackId,
+                        description,
+                        response.result
+                    )
+                }
+            }
+        } catch (ex: Exception) {
+            if (ex is CancellationException) throw ex
+            logger.warn("Failed to answer callback {}: {}", callbackId, ex.message)
+        }
     }
 
     fun languageMenu(): InlineKeyboardMarkup = InlineKeyboardMarkup(
@@ -105,9 +124,33 @@ class TelegramService(
             .onFailure { logger.warn("Failed to remove inline keyboard for chat={} message={}: {}", chatId, messageId, it.message) }
     }
 
-    suspend fun deleteMessage(chatId: Long, messageId: Long) {
-        runCatching { telegramClient.deleteMessage(chatId, messageId) }
-            .onFailure { logger.warn("Failed to delete message chat={} message={} : {}", chatId, messageId, it.message) }
+    suspend fun deleteMessage(chatId: Long, messageId: Long): Boolean {
+        return try {
+            val response = telegramClient.deleteMessage(chatId, messageId)
+            if (response == null) {
+                return false
+            }
+            if (!response.ok) {
+                val description = response.description.orEmpty()
+                if (description.contains("message to delete not found", ignoreCase = true)) {
+                    logger.debug("Message already deleted chat={} messageId={}", chatId, messageId)
+                    return false
+                }
+                logger.warn(
+                    "Failed to delete message chat={} messageId={} description={} result={}",
+                    chatId,
+                    messageId,
+                    description,
+                    response.result
+                )
+                return false
+            }
+            response.result == true
+        } catch (ex: Exception) {
+            if (ex is CancellationException) throw ex
+            logger.warn("Failed to delete message chat={} messageId={} error={}", chatId, messageId, ex.message)
+            false
+        }
     }
 
     suspend fun broadcast(adminId: Long, targetIds: List<Long>, message: String, parseMode: TelegramParseMode?) {
@@ -171,6 +214,34 @@ class TelegramService(
     }
 
     private fun btn(text: String, data: String) = InlineKeyboardButton(text = text, callbackData = data)
+
+    private suspend fun safeSendPhoto(
+        chatId: Long,
+        photo: InputFile,
+        caption: String? = null,
+        replyMarkup: Any? = null
+    ): Long? {
+        return try {
+            val message = telegramClient.sendPhoto(chatId, photo, caption, replyMarkup)
+            if (message == null) {
+                logger.warn("Telegram sendPhoto returned null for chat={} source={}", chatId, describePhoto(photo))
+                return null
+            }
+            message.message_id
+        } catch (ex: Exception) {
+            if (ex is CancellationException) throw ex
+            logger.warn("Failed to send photo chat={} source={} error={}", chatId, describePhoto(photo), ex.message)
+            null
+        }
+    }
+
+    private fun describePhoto(photo: InputFile): String = when (photo) {
+        is InputFile.Url -> "url"
+        is InputFile.Bytes -> "bytes(${photo.filename},${photo.bytes.size})"
+    }
+
+    private fun preview(text: String): String =
+        text.replace("\n", " ").take(60).let { if (text.length > 60) "$it…" else it }
 
     private fun loadWelcomeResource(): ByteArray? {
         val loader = javaClass.classLoader ?: return null

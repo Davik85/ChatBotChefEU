@@ -80,7 +80,7 @@ class UpdateProcessor(
         }
 
         when {
-            trimmedText.startsWith(COMMAND_START) -> handleStart(user, chatId, language)
+            trimmedText.startsWith(COMMAND_START) -> handleStart(user, chatId, language, message.message_id)
             trimmedText.startsWith(COMMAND_HELP) -> handleHelp(chatId, language)
             trimmedText.startsWith(COMMAND_LANGUAGE) -> handleLanguageMenu(chatId, language)
             trimmedText.equals("Change language", ignoreCase = true) -> handleLanguageMenu(chatId, language)
@@ -113,11 +113,12 @@ class UpdateProcessor(
         }
     }
 
-    private suspend fun handleStart(user: UserProfile, chatId: Long, language: String) {
+    private suspend fun handleStart(user: UserProfile, chatId: Long, language: String, startMessageId: Long?) {
+        clearStartSequence(user, chatId, deleteStartCommand = false)
         userService.updateMode(user.telegramId, null)
         user.mode = null
         userService.updateConversationState(user.telegramId, null)
-        showMainMenu(user, chatId, language, includeImage = true)
+        showMainMenu(user, chatId, language, startMessageId = startMessageId, includeImage = true)
         if (user.locale == null) {
             showLanguageMenu(chatId, language)
         }
@@ -233,13 +234,13 @@ class UpdateProcessor(
             user.lastMenuMessageId = messageId
             userService.updateLastMenuMessageId(user.telegramId, messageId)
         }
-        val (mode, introKey) = when (action) {
-            MainMenuAction.Recipes -> ConversationMode.RECIPES to "mode.recipes.intro"
-            MainMenuAction.Calorie -> ConversationMode.CALORIE to "mode.calorie.intro"
-            MainMenuAction.Ingredient -> ConversationMode.INGREDIENT to "mode.ingredient.intro"
-            MainMenuAction.Help -> ConversationMode.HELP to "mode.help.intro"
+        val (mode, activationKey) = when (action) {
+            MainMenuAction.Recipes -> ConversationMode.RECIPES to "mode.recipes.activated"
+            MainMenuAction.Calorie -> ConversationMode.CALORIE to "mode.calorie.activated"
+            MainMenuAction.Ingredient -> ConversationMode.INGREDIENT to "mode.ingredient.activated"
+            MainMenuAction.Help -> ConversationMode.HELP to "mode.help.activated"
         }
-        activateMode(callbackId, chatId, user, userId, language, mode, introKey)
+        activateMode(callbackId, chatId, user, userId, language, mode, activationKey)
     }
 
     private suspend fun activateMode(
@@ -249,7 +250,7 @@ class UpdateProcessor(
         userId: Long,
         language: String,
         mode: ConversationMode,
-        introKey: String
+        activationKey: String
     ) {
         userService.updateMode(userId, mode)
         user.mode = mode
@@ -258,8 +259,8 @@ class UpdateProcessor(
         logger.info("User {} switched to {}", userId, mode)
         telegramService.answerCallback(callbackId, null)
         clearStartSequence(user, chatId)
-        val intro = i18n.translate(language, introKey)
-        telegramService.safeSendMessage(chatId, intro)
+        val activationMessage = i18n.translate(language, activationKey)
+        telegramService.safeSendMessage(chatId, activationMessage)
     }
 
     private suspend fun showMainMenu(
@@ -282,17 +283,13 @@ class UpdateProcessor(
         }
 
         val greeting = i18n.translate(language, "start.greeting")
-        val greetingMessageId = runCatching { telegramService.safeSendMessage(chatId, greeting) }
-            .onFailure { logger.warn("Failed to send welcome greeting", it) }
-            .getOrNull()
+        val greetingMessageId = telegramService.safeSendMessage(chatId, greeting)
         user.lastWelcomeGreetingMessageId = greetingMessageId
         userService.updateLastWelcomeGreetingMessageId(user.telegramId, greetingMessageId)
 
         val menuTitle = i18n.translate(language, "menu.main.title")
         val keyboard = telegramService.mainMenuKeyboard(language)
-        val menuMessageId = runCatching { telegramService.safeSendMessage(chatId, menuTitle, keyboard) }
-            .onFailure { logger.warn("Failed to send main menu", it) }
-            .getOrNull()
+        val menuMessageId = telegramService.safeSendMessage(chatId, menuTitle, keyboard)
         user.lastMenuMessageId = menuMessageId
         userService.updateLastMenuMessageId(user.telegramId, menuMessageId)
     }
@@ -458,13 +455,20 @@ class UpdateProcessor(
         val history = messageHistoryService.loadRecent(userId)
         messageHistoryService.append(userId, ROLE_USER, text)
 
-        val systemPrompt = Prompts.system(activeMode, language)
+        val promptBundle = Prompts.bundle(activeMode, language)
+        val systemPrompt = promptBundle.system
+        val stylePrefix = promptBundle.stylePrefix
         val messages = buildList {
             add(ChatMessage(role = "system", content = systemPrompt))
             history.forEach { stored ->
-                add(ChatMessage(role = stored.role, content = stored.content))
+                val content = if (stored.role == ROLE_USER) {
+                    "$stylePrefix${stored.content}"
+                } else {
+                    stored.content
+                }
+                add(ChatMessage(role = stored.role, content = content))
             }
-            add(ChatMessage(role = ROLE_USER, content = text))
+            add(ChatMessage(role = ROLE_USER, content = "$stylePrefix$text"))
         }
         val completion = openAIClient.complete(messages)
         val intro = i18n.translate(language, "chef_intro")

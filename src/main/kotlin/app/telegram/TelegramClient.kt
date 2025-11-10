@@ -131,16 +131,16 @@ class TelegramClient(
         executePost("editMessageReplyMarkup", payload)
     }
 
-    suspend fun deleteMessage(chatId: Long, messageId: Long) {
+    suspend fun deleteMessage(chatId: Long, messageId: Long): TelegramResponse<Boolean>? {
         val payload = mapOf(
             "chat_id" to chatId,
             "message_id" to messageId
         )
         logOutbound("deleteMessage", payload)
-        executePost("deleteMessage", payload)
+        return executePostForTelegramResponse("deleteMessage", payload, Boolean::class.java)
     }
 
-    fun answerCallback(callbackId: String, text: String? = null) {
+    fun answerCallback(callbackId: String, text: String? = null): TelegramResponse<Boolean>? {
         val payload = mutableMapOf<String, Any>(
             "callback_query_id" to callbackId
         )
@@ -148,7 +148,7 @@ class TelegramClient(
             payload["text"] = text
             payload["show_alert"] = false
         }
-        executePost("answerCallbackQuery", payload)
+        return executePostForTelegramResponse("answerCallbackQuery", payload, Boolean::class.java)
     }
 
     fun deleteWebhook(dropPendingUpdates: Boolean) {
@@ -237,6 +237,38 @@ class TelegramClient(
     }
 
     private fun <T> executePostForResult(method: String, payload: Any, clazz: Class<T>): T? {
+        val response = executePostForTelegramResponse(method, payload, clazz) ?: return null
+        if (response.ok) {
+            return response.result
+        }
+        val safeUrl = maskUrl(buildUrl(method))
+        logger.warn(
+            "Telegram API returned ok=false: method={} url={} description={} result={}",
+            method,
+            safeUrl,
+            response.description,
+            response.result
+        )
+        return null
+    }
+
+    private fun <T> executeMultipartForResult(method: String, body: MultipartBody, clazz: Class<T>): T? {
+        val response = executeMultipartForTelegramResponse(method, body, clazz) ?: return null
+        if (response.ok) {
+            return response.result
+        }
+        val safeUrl = maskUrl(buildUrl(method))
+        logger.warn(
+            "Telegram API returned ok=false: method={} url={} description={} result={}",
+            method,
+            safeUrl,
+            response.description,
+            response.result
+        )
+        return null
+    }
+
+    private fun <T> executePostForTelegramResponse(method: String, payload: Any, clazz: Class<T>): TelegramResponse<T>? {
         val url = buildUrl(method)
         val body = mapper.writeValueAsString(payload).toRequestBody(MEDIA_TYPE_JSON)
         val request = Request.Builder()
@@ -252,7 +284,7 @@ class TelegramClient(
             }
             if (responseBody.isBlank()) return null
             val type = mapper.typeFactory.constructParametricType(TelegramResponse::class.java, clazz)
-            val telegramResponse = try {
+            return try {
                 @Suppress("UNCHECKED_CAST")
                 mapper.readValue(responseBody, type) as TelegramResponse<T>
             } catch (ex: Exception) {
@@ -263,25 +295,12 @@ class TelegramClient(
                     responseBody,
                     ex
                 )
-                return null
+                null
             }
-            if (telegramResponse.ok) {
-                return telegramResponse.result
-            }
-            logger.warn(
-                "Telegram API returned ok=false: method={} status={} url={} error_code={} description={} body={}",
-                method,
-                response.code,
-                safeUrl,
-                null,
-                telegramResponse.description,
-                responseBody
-            )
-            return null
         }
     }
 
-    private fun <T> executeMultipartForResult(method: String, body: MultipartBody, clazz: Class<T>): T? {
+    private fun <T> executeMultipartForTelegramResponse(method: String, body: MultipartBody, clazz: Class<T>): TelegramResponse<T>? {
         val url = buildUrl(method)
         val request = Request.Builder()
             .url(url)
@@ -296,7 +315,7 @@ class TelegramClient(
             }
             if (responseBody.isBlank()) return null
             val type = mapper.typeFactory.constructParametricType(TelegramResponse::class.java, clazz)
-            val telegramResponse = try {
+            return try {
                 @Suppress("UNCHECKED_CAST")
                 mapper.readValue(responseBody, type) as TelegramResponse<T>
             } catch (ex: Exception) {
@@ -307,21 +326,8 @@ class TelegramClient(
                     responseBody,
                     ex
                 )
-                return null
+                null
             }
-            if (telegramResponse.ok) {
-                return telegramResponse.result
-            }
-            logger.warn(
-                "Telegram API returned ok=false: method={} status={} url={} error_code={} description={} body={}",
-                method,
-                response.code,
-                safeUrl,
-                null,
-                telegramResponse.description,
-                responseBody
-            )
-            return null
         }
     }
 
