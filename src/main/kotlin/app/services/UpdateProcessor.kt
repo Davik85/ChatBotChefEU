@@ -266,10 +266,10 @@ class UpdateProcessor(
         user: UserProfile,
         chatId: Long,
         language: String,
-        includeImage: Boolean
+        startMessageId: Long?
     ) {
-        user.lastStartCommandMessageId = startCommandMessageId
-        userService.updateLastStartCommandMessageId(user.telegramId, startCommandMessageId)
+        user.lastStartCommandMessageId = startMessageId
+        userService.updateLastStartCommandMessageId(user.telegramId, startMessageId)
 
         val imageMessageId = telegramService.sendWelcomeImage(chatId)
         user.lastWelcomeImageMessageId = imageMessageId
