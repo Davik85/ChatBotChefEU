@@ -19,7 +19,8 @@ data class UserProfile(
     val locale: String?,
     val conversationState: ConversationState?,
     val createdAt: Instant,
-    var activeMode: String?
+    var mode: ConversationMode?,
+    var lastMenuMessageId: Long?
 )
 
 class UserService {
@@ -41,9 +42,10 @@ class UserService {
                 it[UsersTable.createdAt] = now.atZone(ZoneOffset.UTC).toLocalDateTime()
                 it[UsersTable.mode] = null
                 it[UsersTable.activeMode] = null
+                it[UsersTable.lastMenuMessageId] = null
             }
         }
-        return UserProfile(telegramId, normalizedPreferred, null, now, null)
+        return UserProfile(telegramId, normalizedPreferred, null, now, null, null)
     }
 
     suspend fun updateLocale(telegramId: Long, locale: String?) {
@@ -71,20 +73,32 @@ class UserService {
         }
     }
 
-    suspend fun getActiveMode(telegramId: Long): String? {
+    suspend fun getMode(telegramId: Long): ConversationMode? {
         return DatabaseFactory.dbQuery {
             UsersTable.slice(UsersTable.activeMode, UsersTable.mode)
                 .select { UsersTable.telegramId eq telegramId }
                 .limit(1)
-                .map { row -> row[UsersTable.activeMode] ?: legacyMode(row[UsersTable.mode]) }
+                .mapNotNull { row ->
+                    val stored = row[UsersTable.activeMode]
+                    stored?.let { runCatching { ConversationMode.valueOf(it) }.getOrNull() }
+                        ?: legacyMode(row[UsersTable.mode])
+                }
                 .firstOrNull()
         }
     }
 
-    suspend fun updateActiveMode(telegramId: Long, mode: String?) {
+    suspend fun updateMode(telegramId: Long, mode: ConversationMode?) {
         DatabaseFactory.dbQuery {
             UsersTable.update({ UsersTable.telegramId eq telegramId }) {
-                it[UsersTable.activeMode] = mode
+                it[UsersTable.activeMode] = mode?.name
+            }
+        }
+    }
+
+    suspend fun updateLastMenuMessageId(telegramId: Long, messageId: Long?) {
+        DatabaseFactory.dbQuery {
+            UsersTable.update({ UsersTable.telegramId eq telegramId }) {
+                it[UsersTable.lastMenuMessageId] = messageId
             }
         }
     }
@@ -100,13 +114,16 @@ class UserService {
     private fun toUser(row: ResultRow): UserProfile {
         val created = row[UsersTable.createdAt].atZone(ZoneOffset.UTC).toInstant()
         val stateRaw = row[UsersTable.conversationState]
-        val activeMode = row[UsersTable.activeMode] ?: legacyMode(row[UsersTable.mode])
+        val storedMode = row[UsersTable.activeMode]
+        val mode = storedMode?.let { runCatching { ConversationMode.valueOf(it) }.getOrNull() }
+            ?: legacyMode(row[UsersTable.mode])
         return UserProfile(
             telegramId = row[UsersTable.telegramId],
             locale = row[UsersTable.locale],
             conversationState = stateRaw?.let { runCatching { ConversationState.valueOf(it) }.getOrNull() },
             createdAt = created,
-            activeMode = activeMode
+            mode = mode,
+            lastMenuMessageId = row[UsersTable.lastMenuMessageId]
         )
     }
 
@@ -117,12 +134,12 @@ class UserService {
         return normalized?.takeIf { LanguageSupport.isSupported(it) }
     }
 
-    private fun legacyMode(raw: String?): String? {
+    private fun legacyMode(raw: String?): ConversationMode? {
         return when (raw) {
-            "RECIPES" -> "RECIPES"
-            "CALORIES", "CALORIE_CALCULATOR" -> "CALORIES"
-            "PRODUCT_INFO", "INGREDIENT_MACROS" -> "INGREDIENT"
-            "HELP" -> "HELP"
+            "RECIPES" -> ConversationMode.RECIPES
+            "CALORIES", "CALORIE_CALCULATOR" -> ConversationMode.CALORIE
+            "PRODUCT_INFO", "INGREDIENT_MACROS" -> ConversationMode.INGREDIENT
+            "HELP" -> ConversationMode.HELP
             else -> null
         }
     }
