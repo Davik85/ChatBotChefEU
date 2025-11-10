@@ -26,6 +26,7 @@ class TelegramService(
     suspend fun safeSendMessage(chatId: Long, text: String, replyMarkup: Any? = null): Long? {
         val outbound = buildOutbound(chatId, text, replyMarkup)
         telegramClient.sendMessage(outbound)
+        return TODO("Provide the return value")
     }
 
     suspend fun sendPhoto(chatId: Long, photo: InputFile, caption: String? = null, replyMarkup: Any? = null): Message? {
