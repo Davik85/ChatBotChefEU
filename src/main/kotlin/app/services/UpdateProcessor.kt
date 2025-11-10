@@ -266,14 +266,20 @@ class UpdateProcessor(
         user: UserProfile,
         chatId: Long,
         language: String,
-        startMessageId: Long?
+        startMessageId: Long? = user.lastStartCommandMessageId,
+        includeImage: Boolean = true
     ) {
-        user.lastStartCommandMessageId = startMessageId
-        userService.updateLastStartCommandMessageId(user.telegramId, startMessageId)
+        val effectiveStartMessageId = startMessageId ?: user.lastStartCommandMessageId
+        if (user.lastStartCommandMessageId != effectiveStartMessageId) {
+            user.lastStartCommandMessageId = effectiveStartMessageId
+            userService.updateLastStartCommandMessageId(user.telegramId, effectiveStartMessageId)
+        }
 
-        val imageMessageId = telegramService.sendWelcomeImage(chatId)
-        user.lastWelcomeImageMessageId = imageMessageId
-        userService.updateLastWelcomeImageMessageId(user.telegramId, imageMessageId)
+        if (includeImage) {
+            val sentImageId = telegramService.sendWelcomeImage(chatId)
+            user.lastWelcomeImageMessageId = sentImageId
+            userService.updateLastWelcomeImageMessageId(user.telegramId, sentImageId)
+        }
 
         val greeting = i18n.translate(language, "start.greeting")
         val greetingMessageId = runCatching { telegramService.safeSendMessage(chatId, greeting) }
