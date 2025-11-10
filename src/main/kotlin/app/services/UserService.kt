@@ -14,30 +14,12 @@ import java.time.ZoneOffset
 
 enum class ConversationState { AWAITING_GREETING }
 
-enum class UIMode {
-    RECIPES,
-    CALORIE_CALCULATOR,
-    INGREDIENT_MACROS,
-    HELP;
-
-    companion object {
-        fun fromRaw(raw: String?): UIMode? {
-            if (raw.isNullOrBlank()) return null
-            return when (raw) {
-                "CALORIES" -> CALORIE_CALCULATOR
-                "PRODUCT_INFO" -> INGREDIENT_MACROS
-                else -> runCatching { valueOf(raw) }.getOrNull()
-            }
-        }
-    }
-}
-
 data class UserProfile(
     val telegramId: Long,
     val locale: String?,
     val conversationState: ConversationState?,
     val createdAt: Instant,
-    val mode: UIMode?
+    var activeMode: String?
 )
 
 class UserService {
@@ -58,6 +40,7 @@ class UserService {
                 it[UsersTable.locale] = normalizedPreferred
                 it[UsersTable.createdAt] = now.atZone(ZoneOffset.UTC).toLocalDateTime()
                 it[UsersTable.mode] = null
+                it[UsersTable.activeMode] = null
             }
         }
         return UserProfile(telegramId, normalizedPreferred, null, now, null)
@@ -88,21 +71,20 @@ class UserService {
         }
     }
 
-    suspend fun getMode(telegramId: Long): UIMode? {
-        val raw = DatabaseFactory.dbQuery {
-            UsersTable.slice(UsersTable.mode)
+    suspend fun getActiveMode(telegramId: Long): String? {
+        return DatabaseFactory.dbQuery {
+            UsersTable.slice(UsersTable.activeMode, UsersTable.mode)
                 .select { UsersTable.telegramId eq telegramId }
                 .limit(1)
-                .map { it[UsersTable.mode] }
+                .map { row -> row[UsersTable.activeMode] ?: legacyMode(row[UsersTable.mode]) }
                 .firstOrNull()
         }
-        return UIMode.fromRaw(raw)
     }
 
-    suspend fun setMode(telegramId: Long, mode: UIMode?) {
+    suspend fun updateActiveMode(telegramId: Long, mode: String?) {
         DatabaseFactory.dbQuery {
             UsersTable.update({ UsersTable.telegramId eq telegramId }) {
-                it[UsersTable.mode] = mode?.name
+                it[UsersTable.activeMode] = mode
             }
         }
     }
@@ -118,13 +100,13 @@ class UserService {
     private fun toUser(row: ResultRow): UserProfile {
         val created = row[UsersTable.createdAt].atZone(ZoneOffset.UTC).toInstant()
         val stateRaw = row[UsersTable.conversationState]
-        val modeRaw = row[UsersTable.mode]
+        val activeMode = row[UsersTable.activeMode] ?: legacyMode(row[UsersTable.mode])
         return UserProfile(
             telegramId = row[UsersTable.telegramId],
             locale = row[UsersTable.locale],
             conversationState = stateRaw?.let { runCatching { ConversationState.valueOf(it) }.getOrNull() },
             createdAt = created,
-            mode = UIMode.fromRaw(modeRaw)
+            activeMode = activeMode
         )
     }
 
@@ -133,5 +115,15 @@ class UserService {
             ?.lowercase()
             ?.substring(0, minOf(2, raw.length))
         return normalized?.takeIf { LanguageSupport.isSupported(it) }
+    }
+
+    private fun legacyMode(raw: String?): String? {
+        return when (raw) {
+            "RECIPES" -> "RECIPES"
+            "CALORIES", "CALORIE_CALCULATOR" -> "CALORIES"
+            "PRODUCT_INFO", "INGREDIENT_MACROS" -> "INGREDIENT"
+            "HELP" -> "HELP"
+            else -> null
+        }
     }
 }
