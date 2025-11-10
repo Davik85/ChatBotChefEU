@@ -236,17 +236,17 @@ class UpdateProcessor(
     ) {
         val user = userService.ensureUser(userId, null)
         val language = i18n.resolveLanguage(user.locale)
-        if (user.lastMenuMessageId == null && messageId != null) {
+        if (messageId != null) {
             user.lastMenuMessageId = messageId
             userService.updateLastMenuMessageId(user.telegramId, messageId)
         }
-        val (mode, confirmationKey) = when (action) {
-            MainMenuAction.Recipes -> ConversationMode.RECIPES to "mode.recipes.confirm"
-            MainMenuAction.Calorie -> ConversationMode.CALORIE to "mode.calorie.confirm"
-            MainMenuAction.Ingredient -> ConversationMode.INGREDIENT to "mode.ingredient.confirm"
-            MainMenuAction.Help -> ConversationMode.HELP to "mode.help.confirm"
+        val (mode, introKey) = when (action) {
+            MainMenuAction.Recipes -> ConversationMode.RECIPES to "mode.recipes.intro"
+            MainMenuAction.Calorie -> ConversationMode.CALORIE to "mode.calorie.intro"
+            MainMenuAction.Ingredient -> ConversationMode.INGREDIENT to "mode.ingredient.intro"
+            MainMenuAction.Help -> ConversationMode.HELP to "mode.help.intro"
         }
-        activateMode(callbackId, chatId, user, userId, language, mode, confirmationKey)
+        activateMode(callbackId, chatId, user, userId, language, mode, introKey)
     }
 
     private suspend fun activateMode(
@@ -256,7 +256,7 @@ class UpdateProcessor(
         userId: Long,
         language: String,
         mode: ConversationMode,
-        confirmationKey: String
+        introKey: String
     ) {
         userService.updateMode(userId, mode)
         user.mode = mode
@@ -264,31 +264,38 @@ class UpdateProcessor(
         messageHistoryService.clear(userId)
         logger.info("User {} switched to {}", userId, mode)
         telegramService.answerCallback(callbackId, null)
-        val confirmation = i18n.translate(language, confirmationKey)
-        telegramService.safeSendMessage(chatId, confirmation)
         clearStartSequence(user, chatId)
+        val intro = i18n.translate(language, introKey)
+        telegramService.safeSendMessage(chatId, intro)
     }
 
     private suspend fun showWelcomeSequence(
         user: UserProfile,
         chatId: Long,
         language: String,
-        startCommandMessageId: Long?
+        startMessageId: Long?
     ) {
-        user.lastStartCommandMessageId = startCommandMessageId
-        userService.updateLastStartCommandMessageId(user.telegramId, startCommandMessageId)
+        user.lastStartCommandMessageId = startMessageId
+        userService.updateLastStartCommandMessageId(user.telegramId, startMessageId)
 
         val imageMessageId = telegramService.sendWelcomeImage(chatId)
         user.lastWelcomeImageMessageId = imageMessageId
         userService.updateLastWelcomeImageMessageId(user.telegramId, imageMessageId)
 
         val greeting = i18n.translate(language, "start.greeting")
-        val keyboard = telegramService.mainMenuKeyboard(language)
-        val messageId = runCatching { telegramService.safeSendMessage(chatId, greeting, keyboard) }
-            .onFailure { logger.warn("Failed to send welcome message", it) }
+        val greetingMessageId = runCatching { telegramService.safeSendMessage(chatId, greeting) }
+            .onFailure { logger.warn("Failed to send welcome greeting", it) }
             .getOrNull()
-        user.lastMenuMessageId = messageId
-        userService.updateLastMenuMessageId(user.telegramId, messageId)
+        user.lastWelcomeGreetingMessageId = greetingMessageId
+        userService.updateLastWelcomeGreetingMessageId(user.telegramId, greetingMessageId)
+
+        val menuTitle = i18n.translate(language, "menu.main.title")
+        val keyboard = telegramService.mainMenuKeyboard(language)
+        val menuMessageId = runCatching { telegramService.safeSendMessage(chatId, menuTitle, keyboard) }
+            .onFailure { logger.warn("Failed to send main menu", it) }
+            .getOrNull()
+        user.lastMenuMessageId = menuMessageId
+        userService.updateLastMenuMessageId(user.telegramId, menuMessageId)
     }
 
     private suspend fun clearStartSequence(user: UserProfile, chatId: Long, deleteStartCommand: Boolean = true) {
@@ -297,6 +304,13 @@ class UpdateProcessor(
             telegramService.deleteMessage(chatId, imageId)
             user.lastWelcomeImageMessageId = null
             userService.updateLastWelcomeImageMessageId(user.telegramId, null)
+        }
+
+        val greetingId = user.lastWelcomeGreetingMessageId
+        if (greetingId != null) {
+            telegramService.deleteMessage(chatId, greetingId)
+            user.lastWelcomeGreetingMessageId = null
+            userService.updateLastWelcomeGreetingMessageId(user.telegramId, null)
         }
 
         val menuId = user.lastMenuMessageId
