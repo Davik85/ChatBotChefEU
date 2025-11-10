@@ -88,6 +88,49 @@ class TelegramClient(
         }
     }
 
+    suspend fun editMessageText(
+        chatId: Long,
+        messageId: Long,
+        text: String,
+        parseMode: ParseMode? = null,
+        replyMarkup: Any? = null
+    ) {
+        val payload = mutableMapOf<String, Any>(
+            "chat_id" to chatId,
+            "message_id" to messageId,
+            "text" to text
+        )
+        when (parseMode) {
+            ParseMode.HTML -> payload["parse_mode"] = "HTML"
+            ParseMode.MARKDOWN -> payload["parse_mode"] = "Markdown"
+            null -> {}
+        }
+        if (replyMarkup != null) {
+            payload["reply_markup"] = replyMarkup
+        }
+        logOutbound("editMessageText", payload)
+        executePost("editMessageText", payload)
+    }
+
+    suspend fun editMessageReplyMarkup(chatId: Long, messageId: Long, replyMarkup: Any) {
+        val payload = mutableMapOf<String, Any>(
+            "chat_id" to chatId,
+            "message_id" to messageId,
+            "reply_markup" to replyMarkup
+        )
+        logOutbound("editMessageReplyMarkup", payload)
+        executePost("editMessageReplyMarkup", payload)
+    }
+
+    suspend fun deleteMessage(chatId: Long, messageId: Long) {
+        val payload = mapOf(
+            "chat_id" to chatId,
+            "message_id" to messageId
+        )
+        logOutbound("deleteMessage", payload)
+        executePost("deleteMessage", payload)
+    }
+
     fun answerCallback(callbackId: String, text: String? = null) {
         val payload = mutableMapOf<String, Any>(
             "callback_query_id" to callbackId
