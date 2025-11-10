@@ -22,6 +22,7 @@ data class UserProfile(
     var mode: ConversationMode?,
     var lastMenuMessageId: Long?,
     var lastWelcomeImageMessageId: Long?,
+    var lastWelcomeGreetingMessageId: Long?,
     var lastStartCommandMessageId: Long?
 )
 
@@ -46,10 +47,11 @@ class UserService {
                 it[UsersTable.activeMode] = null
                 it[UsersTable.lastMenuMessageId] = null
                 it[UsersTable.lastWelcomeImageMessageId] = null
+                it[UsersTable.lastWelcomeGreetingMessageId] = null
                 it[UsersTable.lastStartCommandMessageId] = null
             }
         }
-        return UserProfile(telegramId, normalizedPreferred, null, now, null, null, null, null)
+        return UserProfile(telegramId, normalizedPreferred, null, now, null, null, null, null, null)
     }
 
     suspend fun updateLocale(telegramId: Long, locale: String?) {
@@ -99,28 +101,40 @@ class UserService {
         }
     }
 
-    suspend fun updateLastMenuMessageId(telegramId: Long, messageId: Long?) {
+    suspend fun updateLastMenuMessageId(telegramId: Long, messageId: Long?): Long? {
         DatabaseFactory.dbQuery {
             UsersTable.update({ UsersTable.telegramId eq telegramId }) {
                 it[UsersTable.lastMenuMessageId] = messageId
             }
         }
+        return messageId
     }
 
-    suspend fun updateLastWelcomeImageMessageId(telegramId: Long, messageId: Long?) {
+    suspend fun updateLastWelcomeImageMessageId(telegramId: Long, messageId: Long?): Long? {
         DatabaseFactory.dbQuery {
             UsersTable.update({ UsersTable.telegramId eq telegramId }) {
                 it[UsersTable.lastWelcomeImageMessageId] = messageId
             }
         }
+        return messageId
     }
 
-    suspend fun updateLastStartCommandMessageId(telegramId: Long, messageId: Long?) {
+    suspend fun updateLastWelcomeGreetingMessageId(telegramId: Long, messageId: Long?): Long? {
+        DatabaseFactory.dbQuery {
+            UsersTable.update({ UsersTable.telegramId eq telegramId }) {
+                it[UsersTable.lastWelcomeGreetingMessageId] = messageId
+            }
+        }
+        return messageId
+    }
+
+    suspend fun updateLastStartCommandMessageId(telegramId: Long, messageId: Long?): Long? {
         DatabaseFactory.dbQuery {
             UsersTable.update({ UsersTable.telegramId eq telegramId }) {
                 it[UsersTable.lastStartCommandMessageId] = messageId
             }
         }
+        return messageId
     }
 
     suspend fun listAllUserIds(): List<Long> {
@@ -145,6 +159,7 @@ class UserService {
             mode = mode,
             lastMenuMessageId = row[UsersTable.lastMenuMessageId],
             lastWelcomeImageMessageId = row[UsersTable.lastWelcomeImageMessageId],
+            lastWelcomeGreetingMessageId = row[UsersTable.lastWelcomeGreetingMessageId],
             lastStartCommandMessageId = row[UsersTable.lastStartCommandMessageId]
         )
     }
