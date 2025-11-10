@@ -10,6 +10,9 @@ import app.openai.OpenAIClient
 import app.util.LanguageCallbackAction
 import app.util.detectLanguageByGreeting
 import app.util.parseLanguageCallbackData
+import app.services.prompts.CalorieCalculatorPrompt
+import app.services.prompts.PersonaPrompt
+import app.services.prompts.ProductInfoPrompt
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -23,6 +26,7 @@ private const val COMMAND_BROADCAST = "/broadcast"
 private const val COMMAND_ADMIN_STATS = "/adminstats"
 private const val COMMAND_LANGUAGE = "/language"
 private const val COMMAND_START = "/start"
+private const val COMMAND_HELP = "/help"
 private val DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneId.of("UTC"))
 
 class UpdateProcessor(
@@ -61,20 +65,32 @@ class UpdateProcessor(
             return
         }
 
+        val trimmedText = text.trim()
+
         if (user.conversationState == ConversationState.AWAITING_GREETING && !text.startsWith("/")) {
             handleGreetingInput(user, chatId, text, message.from.language_code)
             return
         }
 
         when {
-            text.startsWith(COMMAND_START) -> handleStart(user, chatId, language)
-            text.startsWith(COMMAND_LANGUAGE) -> handleLanguageMenu(chatId, language)
-            text.equals("Change language", ignoreCase = true) -> handleLanguageMenu(chatId, language)
-            text.startsWith(COMMAND_PREMIUM_STATUS) -> handlePremiumStatus(chatId, userId, language)
-            text.startsWith(COMMAND_GRANT_PREMIUM) -> handleGrantPremium(userId, text, language, chatId)
-            text.startsWith(COMMAND_ADMIN_STATS) -> handleAdminStats(userId, chatId, language)
-            text.startsWith(COMMAND_BROADCAST) -> handleBroadcast(userId, text, language, chatId)
-            else -> handleContentMessage(userId, chatId, text, language)
+            trimmedText.startsWith(COMMAND_START) -> handleStart(user, chatId, language)
+            trimmedText.startsWith(COMMAND_HELP) -> handleHelp(chatId, language)
+            trimmedText.startsWith(COMMAND_LANGUAGE) -> handleLanguageMenu(chatId, language)
+            trimmedText.equals("Change language", ignoreCase = true) -> handleLanguageMenu(chatId, language)
+            trimmedText.startsWith(COMMAND_PREMIUM_STATUS) -> handlePremiumStatus(chatId, userId, language)
+            trimmedText.startsWith(COMMAND_GRANT_PREMIUM) -> handleGrantPremium(userId, trimmedText, language, chatId)
+            trimmedText.startsWith(COMMAND_ADMIN_STATS) -> handleAdminStats(userId, chatId, language)
+            trimmedText.startsWith(COMMAND_BROADCAST) -> handleBroadcast(userId, trimmedText, language, chatId)
+            else -> {
+                val labels = menuLabels(language)
+                when (trimmedText) {
+                    labels.recipes -> handleModeSelection(user, chatId, language, BotMode.RECIPES, labels.recipes)
+                    labels.calories -> handleModeSelection(user, chatId, language, BotMode.CALORIES, labels.calories)
+                    labels.product -> handleModeSelection(user, chatId, language, BotMode.PRODUCT_INFO, labels.product)
+                    labels.help -> handleHelp(chatId, language)
+                    else -> handleContentMessage(user, chatId, trimmedText, language)
+                }
+            }
         }
     }
 
@@ -89,11 +105,22 @@ class UpdateProcessor(
     }
 
     private suspend fun handleStart(user: UserProfile, chatId: Long, language: String) {
-        val text = i18n.translate(language, "start_message")
-        telegramService.safeSendMessage(chatId, text)
+        userService.setMode(user.telegramId, BotMode.NONE)
+        telegramService.sendWelcomeImage(chatId)
+        val greeting = buildString {
+            append(i18n.translate(language, "start.title"))
+            append("\n\n")
+            append(i18n.translate(language, "start.modes_title"))
+        }
+        telegramService.safeSendMessage(chatId, greeting, telegramService.mainMenu(language))
         if (user.locale == null) {
             showLanguageMenu(chatId, language)
         }
+    }
+
+    private suspend fun handleHelp(chatId: Long, language: String) {
+        val helpText = i18n.translate(language, "help.text")
+        telegramService.safeSendMessage(chatId, helpText)
     }
 
     private suspend fun handleLanguageMenu(chatId: Long, language: String) {
@@ -257,7 +284,15 @@ class UpdateProcessor(
         telegramService.safeSendMessage(chatId, confirmation)
     }
 
-    private suspend fun handleContentMessage(userId: Long, chatId: Long, text: String, language: String) {
+    private suspend fun handleContentMessage(user: UserProfile, chatId: Long, text: String, language: String) {
+        val userId = user.telegramId
+        val mode = userService.getMode(userId) ?: user.mode ?: BotMode.NONE
+        if (mode == BotMode.NONE) {
+            val reminder = i18n.translate(language, "start.modes_title")
+            telegramService.safeSendMessage(chatId, reminder, telegramService.mainMenu(language))
+            return
+        }
+
         val premium = premiumService.isPremiumActive(userId)
         if (!premium) {
             val usage = usageService.getUsage(userId)
@@ -280,13 +315,15 @@ class UpdateProcessor(
         val history = messageHistoryService.loadRecent(userId)
         messageHistoryService.append(userId, ROLE_USER, text)
 
-        val keywords = i18n.keywords(language, "calorie_keywords")
-        val intent = if (keywords.any { text.lowercase().contains(it) }) "calories" else "recipe"
-        val prefixKey = if (intent == "calories") "calorie_prefix" else "recipe_prefix"
-        val intro = i18n.translate(language, "chef_intro")
+        val systemPrompt = when (mode) {
+            BotMode.RECIPES -> PersonaPrompt.system()
+            BotMode.CALORIES -> CalorieCalculatorPrompt.SYSTEM
+            BotMode.PRODUCT_INFO -> ProductInfoPrompt.SYSTEM
+            BotMode.NONE -> i18n.translate(language, "system_prompt")
+        }
 
         val messages = buildList {
-            add(ChatMessage(role = "system", content = i18n.translate(language, "system_prompt")))
+            add(ChatMessage(role = "system", content = systemPrompt))
             history.forEach { stored ->
                 add(ChatMessage(role = stored.role, content = stored.content))
             }
@@ -294,8 +331,7 @@ class UpdateProcessor(
         }
         val completion = openAIClient.complete(messages)
         val responseText = if (completion != null) {
-            val prefix = i18n.translate(language, prefixKey)
-            "$intro\n$prefix ${completion.trim()}"
+            completion.trim()
         } else {
             i18n.translate(language, "ai_error")
         }
@@ -307,4 +343,42 @@ class UpdateProcessor(
         val text = i18n.translate(language, key)
         telegramService.safeSendMessage(chatId, text)
     }
+
+    private suspend fun handleModeSelection(
+        user: UserProfile,
+        chatId: Long,
+        language: String,
+        mode: BotMode,
+        modeLabel: String
+    ) {
+        userService.setMode(user.telegramId, mode)
+        val removedMessage = i18n.translate(language, "menu.removed", mapOf("name" to modeLabel))
+        telegramService.safeSendMessage(chatId, removedMessage, telegramService.removeKeyboard())
+        val onboardKey = onboardingKey(mode)
+        if (onboardKey != null) {
+            val onboarding = i18n.translate(language, onboardKey)
+            telegramService.safeSendMessage(chatId, onboarding)
+        }
+    }
+
+    private fun onboardingKey(mode: BotMode): String? = when (mode) {
+        BotMode.RECIPES -> "mode.recipes.onboard"
+        BotMode.CALORIES -> "mode.calories.onboard"
+        BotMode.PRODUCT_INFO -> "mode.product.onboard"
+        BotMode.NONE -> null
+    }
+
+    private data class MenuLabels(
+        val recipes: String,
+        val calories: String,
+        val product: String,
+        val help: String
+    )
+
+    private fun menuLabels(language: String): MenuLabels = MenuLabels(
+        recipes = i18n.translate(language, "menu.btn.recipes"),
+        calories = i18n.translate(language, "menu.btn.calorie_calc"),
+        product = i18n.translate(language, "menu.btn.product_info"),
+        help = i18n.translate(language, "menu.btn.help")
+    )
 }

@@ -53,7 +53,8 @@ class WebhookSmokeTest {
                 transport = BotTransport.WEBHOOK,
                 pollIntervalMs = 800L,
                 pollTimeoutSec = 40,
-                telegramOffsetFile = "./.run/test_offset.dat"
+                telegramOffsetFile = "./.run/test_offset.dat",
+                welcomeImageUrl = null
             ),
             openAI = OpenAIConfig(
                 apiKey = "",
@@ -92,8 +93,8 @@ class WebhookSmokeTest {
             client = OkHttpClient(),
             baseUrl = mockServer.url("/").toString().trimEnd('/')
         )
-        val telegramService = TelegramService(appConfig.telegram, telegramClient)
         val i18n = I18n.load(mapper)
+        val telegramService = TelegramService(appConfig.telegram, telegramClient, i18n)
         val premiumService = PremiumService(appConfig.billing)
         val usageService = UsageService()
         val userService = UserService()
