@@ -9,6 +9,7 @@ object UsersTable : LongIdTable("users") {
     val locale = varchar("locale", length = 8).nullable()
     val conversationState = varchar("conversation_state", length = 32).nullable()
     val mode = varchar("mode", length = 32).nullable()
+    val activeMode = varchar("active_mode", length = 32).nullable()
     val createdAt = datetime("created_at")
 }
 
