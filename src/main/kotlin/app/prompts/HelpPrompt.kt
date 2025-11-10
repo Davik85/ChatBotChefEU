@@ -2,13 +2,9 @@ package app.prompts
 
 import app.LanguageSupport
 
-/**
- * System prompt for the "Recipes" role.
- * Always respond in the user's selected language.
- */
-object RecipePrompt {
+object HelpPrompt {
 
-    private val template: String by lazy { PromptLoader.load("recipes.prompt.md") }
+    private val template: String by lazy { PromptLoader.load("help.prompt.md") }
 
     fun system(locale: String): String {
         val langName = LanguageSupport.nativeName(locale.take(2).lowercase())
