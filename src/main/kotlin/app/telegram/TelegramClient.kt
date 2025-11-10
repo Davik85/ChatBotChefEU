@@ -1,5 +1,6 @@
 package app.telegram
 
+import app.InputFile
 import app.MessageEntity
 import app.TelegramConfig
 import app.Update
@@ -7,6 +8,7 @@ import app.util.SecretMasker
 import com.fasterxml.jackson.databind.ObjectMapper
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -38,6 +40,52 @@ class TelegramClient(
         val params = buildSendMessageParams(message)
         logOutbound("sendMessage", params)
         executePost("sendMessage", params)
+    }
+
+    suspend fun sendPhoto(chatId: Long, photo: InputFile, caption: String? = null, replyMarkup: Any? = null) {
+        when (photo) {
+            is InputFile.Url -> {
+                val payload = mutableMapOf<String, Any>(
+                    "chat_id" to chatId,
+                    "photo" to photo.value
+                )
+                if (!caption.isNullOrBlank()) {
+                    payload["caption"] = caption
+                }
+                if (replyMarkup != null) {
+                    payload["reply_markup"] = replyMarkup
+                }
+                logOutbound("sendPhoto", payload)
+                executePost("sendPhoto", payload)
+            }
+            is InputFile.Bytes -> {
+                val bodyBuilder = MultipartBody.Builder().setType(MultipartBody.FORM)
+                bodyBuilder.addFormDataPart("chat_id", chatId.toString())
+                val mediaType = photo.contentType.toMediaType()
+                bodyBuilder.addFormDataPart(
+                    "photo",
+                    photo.filename,
+                    photo.bytes.toRequestBody(mediaType)
+                )
+                if (!caption.isNullOrBlank()) {
+                    bodyBuilder.addFormDataPart("caption", caption)
+                }
+                if (replyMarkup != null) {
+                    val markupJson = mapper.writeValueAsString(replyMarkup)
+                    bodyBuilder.addFormDataPart("reply_markup", markupJson)
+                }
+                logOutbound(
+                    "sendPhoto",
+                    mapOf(
+                        "chat_id" to chatId,
+                        "photo" to "bytes(${photo.filename},${photo.bytes.size})",
+                        "caption" to (caption ?: ""),
+                        "reply_markup" to if (replyMarkup != null) "present" else "null"
+                    )
+                )
+                executeMultipart("sendPhoto", bodyBuilder.build())
+            }
+        }
     }
 
     fun answerCallback(callbackId: String, text: String? = null) {
@@ -102,6 +150,37 @@ class TelegramClient(
     private fun executePost(method: String, payload: Any) {
         val url = buildUrl(method)
         val body = mapper.writeValueAsString(payload).toRequestBody(MEDIA_TYPE_JSON)
+        val request = Request.Builder()
+            .url(url)
+            .post(body)
+            .build()
+        client.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            val safeUrl = maskUrl(url)
+            if (!response.isSuccessful) {
+                logTelegramApiError(response.code, safeUrl, responseBody)
+                return
+            }
+            if (responseBody.isBlank()) return
+            val parsed = runCatching { mapper.readTree(responseBody) }.getOrNull()
+            if (parsed != null && parsed.get("ok")?.asBoolean() == false) {
+                val errorCode = parsed.get("error_code")?.asInt()
+                val description = parsed.get("description")?.asText()
+                logger.warn(
+                    "Telegram API returned ok=false: method={} status={} url={} error_code={} description={} body={}",
+                    method,
+                    response.code,
+                    safeUrl,
+                    errorCode,
+                    description,
+                    responseBody
+                )
+            }
+        }
+    }
+
+    private fun executeMultipart(method: String, body: MultipartBody) {
+        val url = buildUrl(method)
         val request = Request.Builder()
             .url(url)
             .post(body)

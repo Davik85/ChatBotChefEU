@@ -46,7 +46,7 @@ fun main() {
     val i18n = I18n.load(mapper)
     val client = okhttp3.OkHttpClient.Builder().build()
     val telegramClient = TelegramClient(config.telegram, mapper, client)
-    val telegramService = TelegramService(config.telegram, telegramClient)
+    val telegramService = TelegramService(config.telegram, telegramClient, i18n)
     val premiumService = PremiumService(config.billing)
     val usageService = UsageService()
     val userService = UserService()

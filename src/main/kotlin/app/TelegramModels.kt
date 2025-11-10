@@ -69,6 +69,29 @@ data class InlineKeyboardButton(
     @JsonProperty("callback_data") val callbackData: String
 )
 
+data class KeyboardButton(val text: String)
+
+data class ReplyKeyboardMarkup(
+    val keyboard: List<List<KeyboardButton>>,
+    @JsonProperty("resize_keyboard") val resizeKeyboard: Boolean = true,
+    @JsonProperty("one_time_keyboard") val oneTimeKeyboard: Boolean = false,
+    val selective: Boolean = false
+)
+
+data class ReplyKeyboardRemove(
+    @JsonProperty("remove_keyboard") val removeKeyboard: Boolean = true,
+    val selective: Boolean = false
+)
+
+sealed class InputFile {
+    data class Url(val value: String) : InputFile()
+    data class Bytes(
+        val filename: String,
+        val bytes: ByteArray,
+        val contentType: String = "application/octet-stream"
+    ) : InputFile()
+}
+
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class TelegramResponse<T>(
     val ok: Boolean,

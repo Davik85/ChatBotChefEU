@@ -14,11 +14,23 @@ import java.time.ZoneOffset
 
 enum class ConversationState { AWAITING_GREETING }
 
+enum class BotMode {
+    NONE,
+    RECIPES,
+    CALORIES,
+    PRODUCT_INFO;
+
+    companion object {
+        fun fromRaw(raw: String?): BotMode? = raw?.let { runCatching { valueOf(it) }.getOrNull() }
+    }
+}
+
 data class UserProfile(
     val telegramId: Long,
     val locale: String?,
     val conversationState: ConversationState?,
-    val createdAt: Instant
+    val createdAt: Instant,
+    val mode: BotMode?
 )
 
 class UserService {
@@ -38,9 +50,10 @@ class UserService {
                 it[UsersTable.telegramId] = telegramId
                 it[UsersTable.locale] = normalizedPreferred
                 it[UsersTable.createdAt] = now.atZone(ZoneOffset.UTC).toLocalDateTime()
+                it[UsersTable.mode] = null
             }
         }
-        return UserProfile(telegramId, normalizedPreferred, null, now)
+        return UserProfile(telegramId, normalizedPreferred, null, now, null)
     }
 
     suspend fun updateLocale(telegramId: Long, locale: String?) {
@@ -68,6 +81,25 @@ class UserService {
         }
     }
 
+    suspend fun getMode(telegramId: Long): BotMode? {
+        val raw = DatabaseFactory.dbQuery {
+            UsersTable.slice(UsersTable.mode)
+                .select { UsersTable.telegramId eq telegramId }
+                .limit(1)
+                .map { it[UsersTable.mode] }
+                .firstOrNull()
+        }
+        return BotMode.fromRaw(raw)
+    }
+
+    suspend fun setMode(telegramId: Long, mode: BotMode?) {
+        DatabaseFactory.dbQuery {
+            UsersTable.update({ UsersTable.telegramId eq telegramId }) {
+                it[UsersTable.mode] = mode?.name
+            }
+        }
+    }
+
     suspend fun listAllUserIds(): List<Long> {
         return DatabaseFactory.dbQuery {
             UsersTable.slice(listOf(UsersTable.telegramId))
@@ -79,11 +111,13 @@ class UserService {
     private fun toUser(row: ResultRow): UserProfile {
         val created = row[UsersTable.createdAt].atZone(ZoneOffset.UTC).toInstant()
         val stateRaw = row[UsersTable.conversationState]
+        val modeRaw = row[UsersTable.mode]
         return UserProfile(
             telegramId = row[UsersTable.telegramId],
             locale = row[UsersTable.locale],
             conversationState = stateRaw?.let { runCatching { ConversationState.valueOf(it) }.getOrNull() },
-            createdAt = created
+            createdAt = created,
+            mode = BotMode.fromRaw(modeRaw)
         )
     }
 

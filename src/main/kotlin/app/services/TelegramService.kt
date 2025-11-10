@@ -1,32 +1,44 @@
 package app.services
 
+import app.I18n
 import app.InlineKeyboardButton
 import app.InlineKeyboardMarkup
+import app.InputFile
+import app.KeyboardButton
 import app.LanguageSupport
+import app.ReplyKeyboardMarkup
+import app.ReplyKeyboardRemove
 import app.TelegramConfig
 import app.TelegramParseMode
 import app.telegram.OutMessage
 import app.telegram.ParseMode
 import app.telegram.TelegramClient
+import java.nio.charset.StandardCharsets
+import java.util.Base64
 import org.slf4j.LoggerFactory
 
 class TelegramService(
     private val config: TelegramConfig,
-    private val telegramClient: TelegramClient
+    private val telegramClient: TelegramClient,
+    private val i18n: I18n
 ) {
     private val logger = LoggerFactory.getLogger(TelegramService::class.java)
+    private val welcomeImageUrl = config.welcomeImageUrl?.takeIf { it.isNotBlank() }
 
     suspend fun sendMessage(message: OutMessage) {
         telegramClient.sendMessage(message)
     }
 
-    suspend fun safeSendMessage(chatId: Long, text: String, markup: InlineKeyboardMarkup? = null) {
+    suspend fun safeSendMessage(chatId: Long, text: String, replyMarkup: Any? = null) {
         val (finalText, parseMode) = when (config.parseMode) {
             TelegramParseMode.MARKDOWN -> text to ParseMode.MARKDOWN
             TelegramParseMode.HTML -> sanitizeHtml(text)
             else -> text to null
         }
-        val sanitizedMarkup = sanitizeMarkup(markup)
+        val sanitizedMarkup = when (replyMarkup) {
+            is InlineKeyboardMarkup -> sanitizeMarkup(replyMarkup)
+            else -> replyMarkup
+        }
         val outbound = OutMessage(
             chatId = chatId,
             text = finalText,
@@ -35,6 +47,27 @@ class TelegramService(
             replyMarkup = sanitizedMarkup
         )
         telegramClient.sendMessage(outbound)
+    }
+
+    suspend fun sendPhoto(chatId: Long, photo: InputFile, caption: String? = null, replyMarkup: Any? = null) {
+        telegramClient.sendPhoto(chatId, photo, caption, replyMarkup)
+    }
+
+    suspend fun sendWelcomeImage(chatId: Long) {
+        val url = welcomeImageUrl
+        if (url != null) {
+            runCatching { sendPhoto(chatId, InputFile.Url(url)) }
+                .onFailure { logger.warn("Failed to send welcome image from URL: {}", it.message) }
+                .onSuccess { return }
+        }
+        val resourceBytes = loadWelcomeResource()
+        if (resourceBytes != null) {
+            runCatching {
+                sendPhoto(chatId, InputFile.Bytes(filename = "welcome.jpg", bytes = resourceBytes, contentType = "image/jpeg"))
+            }.onFailure { logger.warn("Failed to send welcome image from resources: {}", it.message) }
+        } else {
+            logger.warn("Welcome image resource not found")
+        }
     }
 
     suspend fun notifyAdmins(text: String) {
@@ -65,6 +98,26 @@ class TelegramService(
             )
         )
     )
+
+    fun mainMenu(language: String): ReplyKeyboardMarkup {
+        val recipes = i18n.translate(language, "menu.btn.recipes")
+        val calories = i18n.translate(language, "menu.btn.calorie_calc")
+        val product = i18n.translate(language, "menu.btn.product_info")
+        val help = i18n.translate(language, "menu.btn.help")
+        return ReplyKeyboardMarkup(
+            keyboard = listOf(
+                listOf(KeyboardButton(recipes)),
+                listOf(KeyboardButton(calories)),
+                listOf(KeyboardButton(product)),
+                listOf(KeyboardButton(help))
+            ),
+            resizeKeyboard = true,
+            oneTimeKeyboard = false,
+            selective = false
+        )
+    }
+
+    fun removeKeyboard(): ReplyKeyboardRemove = ReplyKeyboardRemove(removeKeyboard = true, selective = false)
 
     suspend fun broadcast(adminId: Long, targetIds: List<Long>, message: String, parseMode: TelegramParseMode?) {
         logger.info("Admin {} triggered broadcast to {} users", adminId, targetIds.size)
@@ -108,4 +161,20 @@ class TelegramService(
     }
 
     private fun btn(text: String, data: String) = InlineKeyboardButton(text = text, callbackData = data)
+
+    private fun loadWelcomeResource(): ByteArray? {
+        val loader = javaClass.classLoader ?: return null
+        loader.getResourceAsStream("welcome.jpg")?.use { stream ->
+            return runCatching { stream.readBytes() }.getOrNull()
+        }
+        loader.getResourceAsStream("welcome.jpg.b64")?.use { stream ->
+            val encoded = runCatching { stream.readBytes().toString(StandardCharsets.UTF_8) }
+                .getOrNull()
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: return null
+            return runCatching { Base64.getDecoder().decode(encoded) }.getOrNull()
+        }
+        return null
+    }
 }

@@ -88,7 +88,8 @@ data class TelegramConfig(
     val transport: BotTransport,
     val pollIntervalMs: Long,
     val pollTimeoutSec: Int,
-    val telegramOffsetFile: String
+    val telegramOffsetFile: String,
+    val welcomeImageUrl: String?
 )
 
 enum class BotTransport {
@@ -237,7 +238,8 @@ object Env {
             transport = transport,
             pollIntervalMs = pollIntervalMs,
             pollTimeoutSec = pollTimeoutSec,
-            telegramOffsetFile = offsetFile
+            telegramOffsetFile = offsetFile,
+            welcomeImageUrl = tracker.get("WELCOME_IMAGE_URL")
         )
 
         val openAI = OpenAIConfig(
