@@ -5,6 +5,7 @@ import app.InlineKeyboardButton
 import app.InlineKeyboardMarkup
 import app.InputFile
 import app.LanguageSupport
+import app.Message
 import app.TelegramConfig
 import app.TelegramParseMode
 import app.telegram.OutMessage
@@ -32,25 +33,36 @@ class TelegramService(
         return response?.message_id
     }
 
-    suspend fun sendPhoto(chatId: Long, photo: InputFile, caption: String? = null, replyMarkup: Any? = null) {
-        telegramClient.sendPhoto(chatId, photo, caption, replyMarkup)
+    suspend fun sendPhoto(chatId: Long, photo: InputFile, caption: String? = null, replyMarkup: Any? = null): Message? {
+        return telegramClient.sendPhoto(chatId, photo, caption, replyMarkup)
     }
 
-    suspend fun sendWelcomeImage(chatId: Long) {
+    suspend fun sendWelcomeImage(chatId: Long): Long? {
         val url = welcomeImageUrl
         if (url != null) {
-            runCatching { sendPhoto(chatId, InputFile.Url(url)) }
+            val message = runCatching { sendPhoto(chatId, InputFile.Url(url)) }
                 .onFailure { logger.warn("Failed to send welcome image from URL: {}", it.message) }
-                .onSuccess { return }
+                .getOrNull()
+            if (message != null) {
+                return message.message_id
+            }
         }
         val resourceBytes = loadWelcomeResource()
         if (resourceBytes != null) {
-            runCatching {
-                sendPhoto(chatId, InputFile.Bytes(filename = "welcome.jpg", bytes = resourceBytes, contentType = "image/jpeg"))
+            val message = runCatching {
+                sendPhoto(
+                    chatId,
+                    InputFile.Bytes(filename = "welcome.jpg", bytes = resourceBytes, contentType = "image/jpeg")
+                )
             }.onFailure { logger.warn("Failed to send welcome image from resources: {}", it.message) }
+                .getOrNull()
+            if (message != null) {
+                return message.message_id
+            }
         } else {
             logger.warn("Welcome image resource not found")
         }
+        return null
     }
 
     suspend fun notifyAdmins(text: String) {

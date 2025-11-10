@@ -45,7 +45,12 @@ class TelegramClient(
         return executePostForResult("sendMessage", params, Message::class.java)
     }
 
-    suspend fun sendPhoto(chatId: Long, photo: InputFile, caption: String? = null, replyMarkup: Any? = null) {
+    suspend fun sendPhoto(
+        chatId: Long,
+        photo: InputFile,
+        caption: String? = null,
+        replyMarkup: Any? = null
+    ): Message? {
         when (photo) {
             is InputFile.Url -> {
                 val payload = mutableMapOf<String, Any>(
@@ -59,7 +64,7 @@ class TelegramClient(
                     payload["reply_markup"] = replyMarkup
                 }
                 logOutbound("sendPhoto", payload)
-                executePost("sendPhoto", payload)
+                return executePostForResult("sendPhoto", payload, Message::class.java)
             }
             is InputFile.Bytes -> {
                 val bodyBuilder = MultipartBody.Builder().setType(MultipartBody.FORM)
@@ -86,9 +91,10 @@ class TelegramClient(
                         "reply_markup" to if (replyMarkup != null) "present" else "null"
                     )
                 )
-                executeMultipart("sendPhoto", bodyBuilder.build())
+                return executeMultipartForResult("sendPhoto", bodyBuilder.build(), Message::class.java)
             }
         }
+        return null
     }
 
     suspend fun editMessageText(
@@ -275,7 +281,7 @@ class TelegramClient(
         }
     }
 
-    private fun executeMultipart(method: String, body: MultipartBody) {
+    private fun <T> executeMultipartForResult(method: String, body: MultipartBody, clazz: Class<T>): T? {
         val url = buildUrl(method)
         val request = Request.Builder()
             .url(url)
@@ -286,23 +292,36 @@ class TelegramClient(
             val safeUrl = maskUrl(url)
             if (!response.isSuccessful) {
                 logTelegramApiError(response.code, safeUrl, responseBody)
-                return
+                return null
             }
-            if (responseBody.isBlank()) return
-            val parsed = runCatching { mapper.readTree(responseBody) }.getOrNull()
-            if (parsed != null && parsed.get("ok")?.asBoolean() == false) {
-                val errorCode = parsed.get("error_code")?.asInt()
-                val description = parsed.get("description")?.asText()
+            if (responseBody.isBlank()) return null
+            val type = mapper.typeFactory.constructParametricType(TelegramResponse::class.java, clazz)
+            val telegramResponse = try {
+                @Suppress("UNCHECKED_CAST")
+                mapper.readValue(responseBody, type) as TelegramResponse<T>
+            } catch (ex: Exception) {
                 logger.warn(
-                    "Telegram API returned ok=false: method={} status={} url={} error_code={} description={} body={}",
+                    "Telegram API response parse error: method={} url={} body={}",
                     method,
-                    response.code,
                     safeUrl,
-                    errorCode,
-                    description,
-                    responseBody
+                    responseBody,
+                    ex
                 )
+                return null
             }
+            if (telegramResponse.ok) {
+                return telegramResponse.result
+            }
+            logger.warn(
+                "Telegram API returned ok=false: method={} status={} url={} error_code={} description={} body={}",
+                method,
+                response.code,
+                safeUrl,
+                null,
+                telegramResponse.description,
+                responseBody
+            )
+            return null
         }
     }
 
