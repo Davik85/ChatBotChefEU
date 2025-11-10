@@ -8,6 +8,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import org.slf4j.Logger
 import java.io.File
+import java.io.IOException
+import java.net.SocketTimeoutException
+import kotlin.math.min
 
 class LongPollingRunner(
     private val tg: TelegramClient,
@@ -24,6 +27,7 @@ class LongPollingRunner(
             config.pollIntervalMs,
             config.telegramOffsetFile
         )
+        var backoffMs = config.pollIntervalMs
         while (isActive) {
             try {
                 val updates = tg.getUpdates(
@@ -33,6 +37,22 @@ class LongPollingRunner(
                 if (updates.isNotEmpty()) {
                     processUpdates(updates)
                 }
+                backoffMs = config.pollIntervalMs
+            } catch (timeout: SocketTimeoutException) {
+                logger.debug(
+                    "LongPolling: timeout after {}s waiting for updates",
+                    config.pollTimeoutSec
+                )
+                backoffMs = config.pollIntervalMs
+            } catch (io: IOException) {
+                logger.warn(
+                    "LongPolling: I/O error, retrying in {} ms: {}",
+                    backoffMs,
+                    io.message
+                )
+                delay(backoffMs)
+                backoffMs = min(backoffMs * 2, 15_000L)
+                continue
             } catch (e: Exception) {
                 logger.warn("LongPolling: cycle error", e)
             }

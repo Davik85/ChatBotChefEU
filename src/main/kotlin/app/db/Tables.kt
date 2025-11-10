@@ -10,6 +10,7 @@ object UsersTable : LongIdTable("users") {
     val conversationState = varchar("conversation_state", length = 32).nullable()
     val mode = varchar("mode", length = 32).nullable()
     val activeMode = varchar("active_mode", length = 32).nullable()
+    val lastMenuMessageId = long("last_menu_message_id").nullable()
     val createdAt = datetime("created_at")
 }
 

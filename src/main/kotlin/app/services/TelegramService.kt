@@ -27,22 +27,7 @@ class TelegramService(
     }
 
     suspend fun safeSendMessage(chatId: Long, text: String, replyMarkup: Any? = null) {
-        val (finalText, parseMode) = when (config.parseMode) {
-            TelegramParseMode.MARKDOWN -> text to ParseMode.MARKDOWN
-            TelegramParseMode.HTML -> sanitizeHtml(text)
-            else -> text to null
-        }
-        val sanitizedMarkup = when (replyMarkup) {
-            is InlineKeyboardMarkup -> sanitizeMarkup(replyMarkup)
-            else -> replyMarkup
-        }
-        val outbound = OutMessage(
-            chatId = chatId,
-            text = finalText,
-            parseMode = parseMode,
-            disableWebPagePreview = true,
-            replyMarkup = sanitizedMarkup
-        )
+        val outbound = buildOutbound(chatId, text, replyMarkup)
         telegramClient.sendMessage(outbound)
     }
 
@@ -96,23 +81,19 @@ class TelegramService(
         )
     )
 
-    fun mainMenuInline(language: String): InlineKeyboardMarkup {
-        return InlineKeyboardMarkup(
-            listOf(
-                listOf(btn(i18n.translate(language, "menu.recipes"), "MODE_RECIPES")),
-                listOf(btn(i18n.translate(language, "menu.calories"), "MODE_CALORIES")),
-                listOf(btn(i18n.translate(language, "menu.ingredient"), "MODE_INGREDIENT")),
-                listOf(btn(i18n.translate(language, "menu.help"), "MODE_HELP"))
-            )
+    fun mainMenuKeyboard(language: String): InlineKeyboardMarkup = InlineKeyboardMarkup(
+        listOf(
+            listOf(btn(i18n.translate(language, "menu.main.btn.recipes"), "mode:recipes")),
+            listOf(btn(i18n.translate(language, "menu.main.btn.calorie"), "mode:calorie")),
+            listOf(btn(i18n.translate(language, "menu.main.btn.ingredient"), "mode:ingredient")),
+            listOf(btn(i18n.translate(language, "menu.main.btn.help"), "mode:help"))
         )
-    }
+    )
 
-    suspend fun sendWelcomeWithMenu(chatId: Long, language: String) {
-        sendWelcomeImage(chatId)
-        val welcomeText = i18n.translate(language, "menu.start.welcome")
-        val markup = mainMenuInline(language)
-        runCatching { safeSendMessage(chatId, welcomeText, markup) }
-            .onFailure { logger.warn("Failed to send welcome text: {}", it.message) }
+    suspend fun sendMainMenu(chatId: Long, text: String, language: String): Long? {
+        val outbound = buildOutbound(chatId, text, mainMenuKeyboard(language))
+        val response = telegramClient.sendMessage(outbound)
+        return response?.message_id
     }
 
     suspend fun removeInlineKeyboard(chatId: Long, messageId: Long) {
@@ -144,6 +125,25 @@ class TelegramService(
         }
     }
 
+    private fun buildOutbound(chatId: Long, text: String, replyMarkup: Any? = null): OutMessage {
+        val (finalText, parseMode) = when (config.parseMode) {
+            TelegramParseMode.MARKDOWN -> text to ParseMode.MARKDOWN
+            TelegramParseMode.HTML -> sanitizeHtml(text)
+            else -> text to null
+        }
+        val sanitizedMarkup = when (replyMarkup) {
+            is InlineKeyboardMarkup -> sanitizeMarkup(replyMarkup)
+            else -> replyMarkup
+        }
+        return OutMessage(
+            chatId = chatId,
+            text = finalText,
+            parseMode = parseMode,
+            disableWebPagePreview = true,
+            replyMarkup = sanitizedMarkup
+        )
+    }
+
     private fun sanitizeHtml(text: String): Pair<String, ParseMode?> {
         val unsafe = text.contains('<') || text.contains('>') || text.contains("&")
         return if (unsafe) {
@@ -171,16 +171,26 @@ class TelegramService(
 
     private fun loadWelcomeResource(): ByteArray? {
         val loader = javaClass.classLoader ?: return null
-        loader.getResourceAsStream("welcome.jpg")?.use { stream ->
-            return runCatching { stream.readBytes() }.getOrNull()
-        }
-        loader.getResourceAsStream("welcome.jpg.b64")?.use { stream ->
-            val encoded = runCatching { stream.readBytes().toString(StandardCharsets.UTF_8) }
-                .getOrNull()
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() }
-                ?: return null
-            return runCatching { Base64.getDecoder().decode(encoded) }.getOrNull()
+        val candidates = listOf(
+            "start_welcome.jpg",
+            "start_welcome.jpg.b64",
+            "welcome.jpg",
+            "welcome.jpg.b64"
+        )
+        candidates.forEach { resource ->
+            loader.getResourceAsStream(resource)?.use { stream ->
+                return when {
+                    resource.endsWith(".b64") -> {
+                        val encoded = runCatching { stream.readBytes().toString(StandardCharsets.UTF_8) }
+                            .getOrNull()
+                            ?.trim()
+                            ?.takeIf { it.isNotEmpty() }
+                            ?: return@use
+                        runCatching { Base64.getDecoder().decode(encoded) }.getOrNull()
+                    }
+                    else -> runCatching { stream.readBytes() }.getOrNull()
+                }
+            }
         }
         return null
     }
