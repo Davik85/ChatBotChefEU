@@ -4,11 +4,10 @@ import org.jetbrains.exposed.dao.id.LongIdTable
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.javatime.datetime
 
-private const val DEFAULT_LANGUAGE = "en"
-
 object UsersTable : LongIdTable("users") {
     val telegramId = long("telegram_id").uniqueIndex()
-    val language = varchar("language", length = 8).default(DEFAULT_LANGUAGE)
+    val locale = varchar("locale", length = 8).nullable()
+    val conversationState = varchar("conversation_state", length = 32).nullable()
     val createdAt = datetime("created_at")
 }
 

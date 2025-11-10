@@ -2,14 +2,18 @@ package app.services
 
 import app.BillingConfig
 import app.I18n
-import app.LanguageMenu
+import app.LanguageSupport
 import app.TelegramParseMode
 import app.Update
 import app.openai.ChatMessage
 import app.openai.OpenAIClient
+import app.util.LanguageCallbackAction
+import app.util.detectLanguageByGreeting
+import app.util.parseLanguageCallbackData
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import org.slf4j.LoggerFactory
 
 private const val ROLE_USER = "user"
 private const val ROLE_ASSISTANT = "assistant"
@@ -33,6 +37,8 @@ class UpdateProcessor(
     private val adminService: AdminService,
     private val adminIds: Set<Long>
 ) : UpdateHandler {
+    private val logger = LoggerFactory.getLogger(UpdateProcessor::class.java)
+
     override suspend fun handle(update: Update) {
         update.callbackQuery?.let { callback ->
             handleCallback(callback.id, callback.from.id, callback.data, callback.message?.chat?.id)
@@ -43,7 +49,7 @@ class UpdateProcessor(
         val chatId = message.chat.id
         val userId = message.from.id
         val user = userService.ensureUser(userId, message.from.language_code)
-        val language = i18n.resolveLanguage(user.language)
+        val language = i18n.resolveLanguage(user.locale)
 
         if (message.photo != null || message.document != null) {
             sendText(chatId, language, "only_text")
@@ -54,9 +60,16 @@ class UpdateProcessor(
             sendText(chatId, language, "only_text")
             return
         }
+
+        if (user.conversationState == ConversationState.AWAITING_GREETING && !text.startsWith("/")) {
+            handleGreetingInput(user, chatId, text, message.from.language_code)
+            return
+        }
+
         when {
-            text.startsWith(COMMAND_START) -> handleStart(chatId, language)
+            text.startsWith(COMMAND_START) -> handleStart(user, chatId, language)
             text.startsWith(COMMAND_LANGUAGE) -> handleLanguageMenu(chatId, language)
+            text.equals("Change language", ignoreCase = true) -> handleLanguageMenu(chatId, language)
             text.startsWith(COMMAND_PREMIUM_STATUS) -> handlePremiumStatus(chatId, userId, language)
             text.startsWith(COMMAND_GRANT_PREMIUM) -> handleGrantPremium(userId, text, language, chatId)
             text.startsWith(COMMAND_ADMIN_STATS) -> handleAdminStats(userId, chatId, language)
@@ -66,25 +79,102 @@ class UpdateProcessor(
     }
 
     private suspend fun handleCallback(callbackId: String, userId: Long, data: String?, chatId: Long?) {
-        if (data == null || chatId == null) return
-        if (!data.startsWith("lang:")) return
-        val requestedLanguage = data.removePrefix("lang:")
-        val languageCode = i18n.resolveLanguage(requestedLanguage)
-        userService.updateLanguage(userId, languageCode)
-        val confirmation = i18n.translate(languageCode, "language_saved")
-        telegramService.answerCallback(callbackId, confirmation)
-        telegramService.safeSendMessage(chatId, confirmation)
+        if (chatId == null) return
+        val action = parseLanguageCallbackData(data) ?: return
+        val user = userService.ensureUser(userId, null)
+        when (action) {
+            is LanguageCallbackAction.SetLocale -> handleLanguageSelection(callbackId, chatId, user, action.locale)
+            LanguageCallbackAction.RequestOther -> handleLanguageOther(callbackId, chatId, user)
+        }
     }
 
-    private suspend fun handleStart(chatId: Long, language: String) {
+    private suspend fun handleStart(user: UserProfile, chatId: Long, language: String) {
         val text = i18n.translate(language, "start_message")
-        val menuText = i18n.translate(language, "choose_language")
-        telegramService.safeSendMessage(chatId, "$text\n\n$menuText")
+        telegramService.safeSendMessage(chatId, text)
+        if (user.locale == null) {
+            showLanguageMenu(chatId, language)
+        }
     }
 
     private suspend fun handleLanguageMenu(chatId: Long, language: String) {
-        val text = i18n.translate(language, "choose_language")
-        telegramService.safeSendMessage(chatId, text, LanguageMenu.buildMenu())
+        showLanguageMenu(chatId, language)
+    }
+
+    private suspend fun handleLanguageSelection(
+        callbackId: String,
+        chatId: Long,
+        user: UserProfile,
+        requestedLocale: String
+    ) {
+        val normalized = normalizeLocale(requestedLocale)
+        if (!LanguageSupport.isSupported(normalized)) {
+            logger.warn("Unsupported locale {} requested via callback by {}", requestedLocale, user.telegramId)
+            telegramService.answerCallback(callbackId, null)
+            return
+        }
+        val locale = normalized!!
+        val alreadyActive = user.locale == locale
+        val responseLanguage = i18n.resolveLanguage(locale)
+        val langName = LanguageSupport.nativeName(locale)
+        val key = if (alreadyActive) "lang.already" else "lang.changed"
+        val confirmation = i18n.translate(responseLanguage, key, mapOf("langName" to langName))
+        telegramService.answerCallback(callbackId, confirmation)
+        telegramService.safeSendMessage(chatId, confirmation, telegramService.languageMenu())
+        userService.updateConversationState(user.telegramId, null)
+        if (!alreadyActive) {
+            userService.updateLocale(user.telegramId, locale)
+            logger.info("Language for user {} set to {} via callback", user.telegramId, locale)
+        }
+    }
+
+    private suspend fun handleLanguageOther(callbackId: String, chatId: Long, user: UserProfile) {
+        val language = i18n.resolveLanguage(user.locale)
+        val title = i18n.translate(language, "lang.other.title")
+        telegramService.answerCallback(callbackId, title)
+        userService.updateConversationState(user.telegramId, ConversationState.AWAITING_GREETING)
+        val prompt = i18n.translate(language, "lang.other.prompt")
+        telegramService.safeSendMessage(chatId, prompt)
+    }
+
+    private suspend fun handleGreetingInput(
+        user: UserProfile,
+        chatId: Long,
+        text: String,
+        fallbackLanguageCode: String?
+    ) {
+        val language = i18n.resolveLanguage(user.locale)
+        val detected = detectLanguageByGreeting(text)
+            ?: normalizeLocale(fallbackLanguageCode)
+        if (detected == null) {
+            val response = i18n.translate(language, "lang.other.unknown")
+            telegramService.safeSendMessage(chatId, response)
+            return
+        }
+        if (!LanguageSupport.isSupported(detected)) {
+            val fallback = i18n.defaultLanguage()
+            userService.updateLocale(user.telegramId, fallback)
+            userService.updateConversationState(user.telegramId, null)
+            val unsupported = i18n.translate(fallback, "lang.other.unsupported")
+            telegramService.safeSendMessage(chatId, unsupported, telegramService.languageMenu())
+            logger.warn("Unsupported locale {} detected for user {}", detected, user.telegramId)
+            return
+        }
+        userService.updateLocale(user.telegramId, detected)
+        userService.updateConversationState(user.telegramId, null)
+        val responseLanguage = i18n.resolveLanguage(detected)
+        val confirmation = i18n.translate(responseLanguage, "lang.other.confirm", mapOf("langName" to LanguageSupport.nativeName(detected)))
+        telegramService.safeSendMessage(chatId, confirmation, telegramService.languageMenu())
+        logger.info("Language for user {} set to {} via greeting", user.telegramId, detected)
+    }
+
+    private suspend fun showLanguageMenu(chatId: Long, language: String) {
+        val prompt = i18n.translate(language, "menu.language.title")
+        telegramService.safeSendMessage(chatId, prompt, telegramService.languageMenu())
+    }
+
+    private fun normalizeLocale(raw: String?): String? {
+        val value = raw?.takeIf { it.isNotBlank() }?.lowercase() ?: return null
+        return value.substring(0, minOf(2, value.length))
     }
 
     private suspend fun handlePremiumStatus(chatId: Long, userId: Long, language: String) {

@@ -25,7 +25,7 @@ class ReminderService(
         }
         due.forEach { (telegramId, expiry) ->
             val user = userService.findUser(telegramId) ?: return@forEach
-            val language = user.language
+            val language = i18n.resolveLanguage(user.locale)
             val message = i18n.translate(language, "premium_reminder", mapOf("date" to DATE_FORMATTER.format(expiry)))
             runCatching { telegramService.safeSendMessage(telegramId, message) }
                 .onFailure { logger.warn("Failed to send reminder to {}: {}", telegramId, it.message) }

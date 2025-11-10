@@ -1,20 +1,23 @@
 package app
 
-import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.io.InputStream
-import java.text.MessageFormat
 import java.util.Locale
 
-private const val DEFAULT_LANGUAGE = "en"
-private val SUPPORTED_LANGUAGES = setOf("en", "de", "es", "it", "fr")
+private val ENV_DEFAULT = System.getenv("DEFAULT_LOCALE")
+    ?.lowercase(Locale.getDefault())
+    ?.takeIf { LanguageSupport.isSupported(it) }
+private val DEFAULT_LANGUAGE = ENV_DEFAULT ?: "en"
+private val SUPPORTED_LANGUAGES = LanguageSupport.supportedLocales
 
 class I18n(private val translations: Map<String, Map<String, String>>) {
     fun resolveLanguage(language: String?): String {
         val normalized = language?.lowercase(Locale.getDefault()) ?: DEFAULT_LANGUAGE
         return if (translations.containsKey(normalized)) normalized else DEFAULT_LANGUAGE
     }
+
+    fun defaultLanguage(): String = DEFAULT_LANGUAGE
 
     fun translate(language: String?, key: String, variables: Map<String, String> = emptyMap()): String {
         val lang = resolveLanguage(language)
