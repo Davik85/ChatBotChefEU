@@ -236,8 +236,7 @@ class UpdateProcessor(
                     telegramService.deleteMessage(chatId, messageId)
                 }
                 val helpText = i18n.translate(language, "help.text")
-                val menu = telegramService.mainMenuInline(language)
-                telegramService.safeSendMessage(chatId, helpText, menu)
+                telegramService.safeSendMessage(chatId, helpText)
             }
             else -> telegramService.answerCallback(callbackId, null)
         }
@@ -262,8 +261,7 @@ class UpdateProcessor(
         if (messageId != null) {
             telegramService.deleteMessage(chatId, messageId)
         }
-        val menu = telegramService.mainMenuInline(language)
-        telegramService.safeSendMessage(chatId, confirmation, menu)
+        telegramService.safeSendMessage(chatId, confirmation)
     }
 
     private suspend fun showLanguageMenu(chatId: Long, language: String) {
