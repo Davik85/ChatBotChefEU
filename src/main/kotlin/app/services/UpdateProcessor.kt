@@ -236,7 +236,8 @@ class UpdateProcessor(
                     telegramService.deleteMessage(chatId, messageId)
                 }
                 val helpText = i18n.translate(language, "help.text")
-                telegramService.safeSendMessage(chatId, helpText)
+                val menu = telegramService.mainMenuInline(language)
+                telegramService.safeSendMessage(chatId, helpText, menu)
             }
             else -> telegramService.answerCallback(callbackId, null)
         }
@@ -261,7 +262,8 @@ class UpdateProcessor(
         if (messageId != null) {
             telegramService.deleteMessage(chatId, messageId)
         }
-        telegramService.safeSendMessage(chatId, confirmation)
+        val menu = telegramService.mainMenuInline(language)
+        telegramService.safeSendMessage(chatId, confirmation, menu)
     }
 
     private suspend fun showLanguageMenu(chatId: Long, language: String) {
@@ -402,14 +404,15 @@ class UpdateProcessor(
         }
         val completion = openAIClient.complete(messages)
         val intro = i18n.translate(language, "chef_intro")
-        val responseText = if (completion != null) {
-            val body = completion.trim()
-            if (body.isNotEmpty()) "$intro\n$body" else intro
+        val body = completion?.trim().orEmpty()
+        val responseText = if (body.isNotEmpty()) {
+            "$intro\n$body"
         } else {
             i18n.translate(language, "ai_error")
         }
         telegramService.safeSendMessage(chatId, responseText)
-        messageHistoryService.append(userId, ROLE_ASSISTANT, responseText)
+        val assistantMessage = if (body.isNotEmpty()) body else responseText
+        messageHistoryService.append(userId, ROLE_ASSISTANT, assistantMessage)
     }
 
     private suspend fun sendText(chatId: Long, language: String, key: String) {
