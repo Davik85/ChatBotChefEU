@@ -20,7 +20,9 @@ data class UserProfile(
     val conversationState: ConversationState?,
     val createdAt: Instant,
     var mode: ConversationMode?,
-    var lastMenuMessageId: Long?
+    var lastMenuMessageId: Long?,
+    var lastWelcomeImageMessageId: Long?,
+    var lastStartCommandMessageId: Long?
 )
 
 class UserService {
@@ -43,9 +45,11 @@ class UserService {
                 it[UsersTable.mode] = null
                 it[UsersTable.activeMode] = null
                 it[UsersTable.lastMenuMessageId] = null
+                it[UsersTable.lastWelcomeImageMessageId] = null
+                it[UsersTable.lastStartCommandMessageId] = null
             }
         }
-        return UserProfile(telegramId, normalizedPreferred, null, now, null, null)
+        return UserProfile(telegramId, normalizedPreferred, null, now, null, null, null, null)
     }
 
     suspend fun updateLocale(telegramId: Long, locale: String?) {
@@ -103,6 +107,22 @@ class UserService {
         }
     }
 
+    suspend fun updateLastWelcomeImageMessageId(telegramId: Long, messageId: Long?) {
+        DatabaseFactory.dbQuery {
+            UsersTable.update({ UsersTable.telegramId eq telegramId }) {
+                it[UsersTable.lastWelcomeImageMessageId] = messageId
+            }
+        }
+    }
+
+    suspend fun updateLastStartCommandMessageId(telegramId: Long, messageId: Long?) {
+        DatabaseFactory.dbQuery {
+            UsersTable.update({ UsersTable.telegramId eq telegramId }) {
+                it[UsersTable.lastStartCommandMessageId] = messageId
+            }
+        }
+    }
+
     suspend fun listAllUserIds(): List<Long> {
         return DatabaseFactory.dbQuery {
             UsersTable.slice(listOf(UsersTable.telegramId))
@@ -123,7 +143,9 @@ class UserService {
             conversationState = stateRaw?.let { runCatching { ConversationState.valueOf(it) }.getOrNull() },
             createdAt = created,
             mode = mode,
-            lastMenuMessageId = row[UsersTable.lastMenuMessageId]
+            lastMenuMessageId = row[UsersTable.lastMenuMessageId],
+            lastWelcomeImageMessageId = row[UsersTable.lastWelcomeImageMessageId],
+            lastStartCommandMessageId = row[UsersTable.lastStartCommandMessageId]
         )
     }
 

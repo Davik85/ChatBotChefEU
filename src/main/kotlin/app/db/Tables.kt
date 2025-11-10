@@ -11,6 +11,8 @@ object UsersTable : LongIdTable("users") {
     val mode = varchar("mode", length = 32).nullable()
     val activeMode = varchar("active_mode", length = 32).nullable()
     val lastMenuMessageId = long("last_menu_message_id").nullable()
+    val lastWelcomeImageMessageId = long("last_welcome_image_message_id").nullable()
+    val lastStartCommandMessageId = long("last_start_command_message_id").nullable()
     val createdAt = datetime("created_at")
 }
 
