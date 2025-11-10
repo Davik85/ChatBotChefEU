@@ -80,7 +80,7 @@ class UpdateProcessor(
         }
 
         when {
-            trimmedText.startsWith(COMMAND_START) -> handleStart(user, chatId, language, message.message_id)
+            trimmedText.startsWith(COMMAND_START) -> handleStart(user, chatId, language)
             trimmedText.startsWith(COMMAND_HELP) -> handleHelp(chatId, language)
             trimmedText.startsWith(COMMAND_LANGUAGE) -> handleLanguageMenu(chatId, language)
             trimmedText.equals("Change language", ignoreCase = true) -> handleLanguageMenu(chatId, language)
@@ -113,12 +113,11 @@ class UpdateProcessor(
         }
     }
 
-    private suspend fun handleStart(user: UserProfile, chatId: Long, language: String, startMessageId: Long) {
-        clearStartSequence(user, chatId)
+    private suspend fun handleStart(user: UserProfile, chatId: Long, language: String) {
         userService.updateMode(user.telegramId, null)
         user.mode = null
         userService.updateConversationState(user.telegramId, null)
-        showWelcomeSequence(user, chatId, language, startMessageId)
+        showMainMenu(user, chatId, language, includeImage = true)
         if (user.locale == null) {
             showLanguageMenu(chatId, language)
         }
@@ -159,9 +158,7 @@ class UpdateProcessor(
         telegramService.safeSendMessage(chatId, confirmation)
         userService.updateMode(user.telegramId, null)
         user.mode = null
-        val preservedStartMessage = user.lastStartCommandMessageId
-        clearStartSequence(user, chatId, deleteStartCommand = false)
-        showWelcomeSequence(user, chatId, responseLanguage, preservedStartMessage)
+        showMainMenu(user, chatId, responseLanguage, includeImage = true)
         userService.updateConversationState(user.telegramId, null)
         if (!alreadyActive) {
             userService.updateLocale(user.telegramId, locale)
@@ -208,9 +205,7 @@ class UpdateProcessor(
             telegramService.safeSendMessage(chatId, unsupported)
             user.mode = null
             userService.updateMode(user.telegramId, null)
-            val preservedStart = user.lastStartCommandMessageId
-            clearStartSequence(user, chatId, deleteStartCommand = false)
-            showWelcomeSequence(user, chatId, fallback, preservedStart)
+            showMainMenu(user, chatId, fallback, includeImage = true)
             logger.warn("Unsupported locale {} detected for user {}", detected, user.telegramId)
             return
         }
@@ -221,9 +216,7 @@ class UpdateProcessor(
         telegramService.safeSendMessage(chatId, confirmation)
         user.mode = null
         userService.updateMode(user.telegramId, null)
-        val preservedStart = user.lastStartCommandMessageId
-        clearStartSequence(user, chatId, deleteStartCommand = false)
-        showWelcomeSequence(user, chatId, responseLanguage, preservedStart)
+        showMainMenu(user, chatId, responseLanguage, includeImage = true)
         logger.info("Language for user {} set to {} via greeting", user.telegramId, detected)
     }
 
@@ -269,7 +262,7 @@ class UpdateProcessor(
         telegramService.safeSendMessage(chatId, intro)
     }
 
-    private suspend fun showWelcomeSequence(
+    private suspend fun showMainMenu(
         user: UserProfile,
         chatId: Long,
         language: String,
@@ -430,11 +423,18 @@ class UpdateProcessor(
         val userId = user.telegramId
         val activeMode = user.mode ?: userService.getMode(userId)
         if (activeMode == null) {
-            val reminder = i18n.translate(language, "start.choose_mode_hint")
-            telegramService.safeSendMessage(chatId, reminder)
+            showMainMenu(user, chatId, language, includeImage = false)
             return
         }
         user.mode = activeMode
+        if (activeMode == ConversationMode.HELP) {
+            val helpText = i18n.translate(language, "mode.help.text")
+            telegramService.safeSendMessage(chatId, helpText)
+            userService.updateMode(userId, null)
+            user.mode = null
+            showMainMenu(user, chatId, language, includeImage = false)
+            return
+        }
 
         val premium = premiumService.isPremiumActive(userId)
         if (!premium) {
