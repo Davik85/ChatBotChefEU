@@ -2,6 +2,7 @@ package app.services
 
 import app.InlineKeyboardButton
 import app.InlineKeyboardMarkup
+import app.LanguageSupport
 import app.TelegramConfig
 import app.TelegramParseMode
 import app.telegram.OutMessage
@@ -50,6 +51,21 @@ class TelegramService(
         telegramClient.answerCallback(callbackId, text)
     }
 
+    fun languageMenu(): InlineKeyboardMarkup = InlineKeyboardMarkup(
+        listOf(
+            listOf(
+                btn(LanguageSupport.inlineLabel("en"), "lang:set:en"),
+                btn(LanguageSupport.inlineLabel("de"), "lang:set:de"),
+                btn(LanguageSupport.inlineLabel("it"), "lang:set:it")
+            ),
+            listOf(
+                btn(LanguageSupport.inlineLabel("es"), "lang:set:es"),
+                btn(LanguageSupport.inlineLabel("fr"), "lang:set:fr"),
+                btn("\uD83C\uDF0D Other", "lang:other")
+            )
+        )
+    )
+
     suspend fun broadcast(adminId: Long, targetIds: List<Long>, message: String, parseMode: TelegramParseMode?) {
         logger.info("Admin {} triggered broadcast to {} users", adminId, targetIds.size)
         targetIds.forEach { chatId ->
@@ -90,4 +106,6 @@ class TelegramService(
         }
         return if (normalizedRows.isEmpty()) null else InlineKeyboardMarkup(normalizedRows)
     }
+
+    private fun btn(text: String, data: String) = InlineKeyboardButton(text = text, callbackData = data)
 }

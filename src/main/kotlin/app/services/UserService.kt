@@ -1,5 +1,6 @@
 package app.services
 
+import app.LanguageSupport
 import app.db.DatabaseFactory
 import app.db.UsersTable
 import app.util.ClockProvider
@@ -11,34 +12,49 @@ import org.jetbrains.exposed.sql.update
 import java.time.Instant
 import java.time.ZoneOffset
 
-private const val DEFAULT_LANGUAGE = "en"
+enum class ConversationState { AWAITING_GREETING }
 
 data class UserProfile(
     val telegramId: Long,
-    val language: String,
+    val locale: String?,
+    val conversationState: ConversationState?,
     val createdAt: Instant
 )
 
 class UserService {
     suspend fun ensureUser(telegramId: Long, preferredLanguage: String?): UserProfile {
         val existing = findUser(telegramId)
-        if (existing != null) return existing
-        val normalizedLang = preferredLanguage?.lowercase() ?: DEFAULT_LANGUAGE
+        val normalizedPreferred = normalizeLocale(preferredLanguage)
+        if (existing != null) {
+            if (existing.locale == null && normalizedPreferred != null) {
+                updateLocale(telegramId, normalizedPreferred)
+                return existing.copy(locale = normalizedPreferred)
+            }
+            return existing
+        }
         val now = Instant.now(ClockProvider.clock)
         DatabaseFactory.dbQuery {
             UsersTable.insert {
                 it[UsersTable.telegramId] = telegramId
-                it[UsersTable.language] = normalizedLang
+                it[UsersTable.locale] = normalizedPreferred
                 it[UsersTable.createdAt] = now.atZone(ZoneOffset.UTC).toLocalDateTime()
             }
         }
-        return UserProfile(telegramId, normalizedLang, now)
+        return UserProfile(telegramId, normalizedPreferred, null, now)
     }
 
-    suspend fun updateLanguage(telegramId: Long, language: String) {
+    suspend fun updateLocale(telegramId: Long, locale: String?) {
         DatabaseFactory.dbQuery {
             UsersTable.update({ UsersTable.telegramId eq telegramId }) {
-                it[UsersTable.language] = language
+                it[UsersTable.locale] = locale
+            }
+        }
+    }
+
+    suspend fun updateConversationState(telegramId: Long, state: ConversationState?) {
+        DatabaseFactory.dbQuery {
+            UsersTable.update({ UsersTable.telegramId eq telegramId }) {
+                it[UsersTable.conversationState] = state?.name
             }
         }
     }
@@ -62,10 +78,19 @@ class UserService {
 
     private fun toUser(row: ResultRow): UserProfile {
         val created = row[UsersTable.createdAt].atZone(ZoneOffset.UTC).toInstant()
+        val stateRaw = row[UsersTable.conversationState]
         return UserProfile(
             telegramId = row[UsersTable.telegramId],
-            language = row[UsersTable.language],
+            locale = row[UsersTable.locale],
+            conversationState = stateRaw?.let { runCatching { ConversationState.valueOf(it) }.getOrNull() },
             createdAt = created
         )
+    }
+
+    private fun normalizeLocale(raw: String?): String? {
+        val normalized = raw?.takeIf { it.isNotBlank() }
+            ?.lowercase()
+            ?.substring(0, minOf(2, raw.length))
+        return normalized?.takeIf { LanguageSupport.isSupported(it) }
     }
 }
