@@ -27,10 +27,9 @@ class TelegramService(
         telegramClient.sendMessage(message)
     }
 
-    suspend fun safeSendMessage(chatId: Long, text: String, replyMarkup: Any? = null): Long? {
+    suspend fun safeSendMessage(chatId: Long, text: String, replyMarkup: Any? = null) {
         val outbound = buildOutbound(chatId, text, replyMarkup)
-        val response = telegramClient.sendMessage(outbound)
-        return response?.message_id
+        telegramClient.sendMessage(outbound)
     }
 
     suspend fun sendPhoto(chatId: Long, photo: InputFile, caption: String? = null, replyMarkup: Any? = null): Message? {
@@ -103,8 +102,11 @@ class TelegramService(
         )
     )
 
-    suspend fun sendMainMenu(chatId: Long, text: String, language: String): Long? =
-        safeSendMessage(chatId, text, mainMenuKeyboard(language))
+    suspend fun sendMainMenu(chatId: Long, text: String, language: String): Long? {
+        val outbound = buildOutbound(chatId, text, mainMenuKeyboard(language))
+        val response = telegramClient.sendMessage(outbound)
+        return response?.message_id
+    }
 
     suspend fun removeInlineKeyboard(chatId: Long, messageId: Long) {
         val emptyMarkup = InlineKeyboardMarkup(emptyList())
