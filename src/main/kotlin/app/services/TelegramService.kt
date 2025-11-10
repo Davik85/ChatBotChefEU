@@ -23,10 +23,6 @@ class TelegramService(
     private val logger = LoggerFactory.getLogger(TelegramService::class.java)
     private val welcomeImageUrl = config.welcomeImageUrl?.takeIf { it.isNotBlank() }
 
-    suspend fun sendMessage(message: OutMessage) {
-        telegramClient.sendMessage(message)
-    }
-
     suspend fun safeSendMessage(chatId: Long, text: String, replyMarkup: Any? = null): Long? {
         val outbound = buildOutbound(chatId, text, replyMarkup)
         val response = telegramClient.sendMessage(outbound)
@@ -102,9 +98,6 @@ class TelegramService(
             listOf(btn(i18n.translate(language, "menu.main.btn.help"), "mode:help"))
         )
     )
-
-    suspend fun sendMainMenu(chatId: Long, text: String, language: String): Long? =
-        safeSendMessage(chatId, text, mainMenuKeyboard(language))
 
     suspend fun removeInlineKeyboard(chatId: Long, messageId: Long) {
         val emptyMarkup = InlineKeyboardMarkup(emptyList())
