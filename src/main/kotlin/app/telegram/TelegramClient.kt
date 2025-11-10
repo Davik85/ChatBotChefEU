@@ -1,9 +1,11 @@
 package app.telegram
 
 import app.InputFile
+import app.Message
 import app.MessageEntity
 import app.TelegramConfig
 import app.Update
+import app.TelegramResponse
 import app.util.SecretMasker
 import com.fasterxml.jackson.databind.ObjectMapper
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -13,6 +15,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.slf4j.LoggerFactory
+import java.util.concurrent.TimeUnit
 
 private val MEDIA_TYPE_JSON = "application/json; charset=utf-8".toMediaType()
 private const val MAX_LOG_TEXT_LENGTH = 1000
@@ -36,10 +39,10 @@ class TelegramClient(
 ) {
     private val logger = LoggerFactory.getLogger(TelegramClient::class.java)
 
-    suspend fun sendMessage(message: OutMessage) {
+    suspend fun sendMessage(message: OutMessage): Message? {
         val params = buildSendMessageParams(message)
         logOutbound("sendMessage", params)
-        executePost("sendMessage", params)
+        return executePostForResult("sendMessage", params, Message::class.java)
     }
 
     suspend fun sendPhoto(chatId: Long, photo: InputFile, caption: String? = null, replyMarkup: Any? = null) {
@@ -159,7 +162,12 @@ class TelegramClient(
             .url(url)
             .get()
             .build()
-        client.newCall(request).execute().use { response ->
+        val pollClient = client.newBuilder()
+            .readTimeout(timeoutSec + 10L, TimeUnit.SECONDS)
+            .callTimeout(timeoutSec + 20L, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
+        pollClient.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
             val safeUrl = maskUrl(url.toString())
             if (!response.isSuccessful) {
@@ -219,6 +227,51 @@ class TelegramClient(
                     responseBody
                 )
             }
+        }
+    }
+
+    private fun <T> executePostForResult(method: String, payload: Any, clazz: Class<T>): T? {
+        val url = buildUrl(method)
+        val body = mapper.writeValueAsString(payload).toRequestBody(MEDIA_TYPE_JSON)
+        val request = Request.Builder()
+            .url(url)
+            .post(body)
+            .build()
+        client.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            val safeUrl = maskUrl(url)
+            if (!response.isSuccessful) {
+                logTelegramApiError(response.code, safeUrl, responseBody)
+                return null
+            }
+            if (responseBody.isBlank()) return null
+            val type = mapper.typeFactory.constructParametricType(TelegramResponse::class.java, clazz)
+            val telegramResponse = try {
+                @Suppress("UNCHECKED_CAST")
+                mapper.readValue(responseBody, type) as TelegramResponse<T>
+            } catch (ex: Exception) {
+                logger.warn(
+                    "Telegram API response parse error: method={} url={} body={}",
+                    method,
+                    safeUrl,
+                    responseBody,
+                    ex
+                )
+                return null
+            }
+            if (telegramResponse.ok) {
+                return telegramResponse.result
+            }
+            logger.warn(
+                "Telegram API returned ok=false: method={} status={} url={} error_code={} description={} body={}",
+                method,
+                response.code,
+                safeUrl,
+                null,
+                telegramResponse.description,
+                responseBody
+            )
+            return null
         }
     }
 
