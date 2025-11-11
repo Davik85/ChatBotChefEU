@@ -5,6 +5,7 @@ import app.BotTransport
 import app.TelegramConfig
 import app.TelegramParseMode
 import app.db.DatabaseFactory
+import app.localization.NoopAutoLocalizationService
 import app.openai.OpenAIClient
 import app.services.AdminService
 import app.services.DeduplicationService
@@ -93,7 +94,7 @@ class WebhookSmokeTest {
             client = OkHttpClient(),
             baseUrl = mockServer.url("/").toString().trimEnd('/')
         )
-        val i18n = I18n.load(mapper)
+        val i18n = I18n.load(mapper, NoopAutoLocalizationService)
         val telegramService = TelegramService(appConfig.telegram, telegramClient, i18n)
         val premiumService = PremiumService(appConfig.billing)
         val usageService = UsageService()
