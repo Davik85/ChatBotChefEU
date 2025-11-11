@@ -2,7 +2,6 @@ package app
 
 import app.EnvMetadata
 import app.db.DatabaseFactory
-import app.localization.OpenAIAutoLocalizationService
 import app.openai.OpenAIClient
 import app.services.*
 import app.telegram.LongPollingRunner
@@ -46,8 +45,7 @@ fun main() {
     val mapper = configuredMapper()
     val client = okhttp3.OkHttpClient.Builder().build()
     val openAIClient = OpenAIClient(config.openAI, mapper, client)
-    val autoLocalization = OpenAIAutoLocalizationService(openAIClient)
-    val i18n = I18n.load(mapper, autoLocalization)
+    val i18n = I18n.load(mapper)
     val telegramClient = TelegramClient(config.telegram, mapper, client)
     val telegramService = TelegramService(config.telegram, telegramClient, i18n)
     val premiumService = PremiumService(config.billing)
