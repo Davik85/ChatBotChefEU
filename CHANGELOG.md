@@ -10,3 +10,4 @@
 - Added welcome image blob `resources/start_welcome.jpg.b64` and ensured `/start` sends the image before the inline menu.
 - Expanded i18n packs with new menu and mode keys and aligned help texts with the new flows.
 - Documented transport setup, prompt locations, and environment behaviour in the README.
+- Localized full i18n packs for de, fr, it, es, pt, nl, pl, cs, sk, sl, hu, ro, bg, el, da, sv, fi, no, is, et, lv, lt, hr, sr, ru, and uk.
