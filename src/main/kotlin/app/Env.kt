@@ -119,12 +119,20 @@ data class BillingConfig(
     val reminderDays: List<Long>
 )
 
+data class HelpConfig(
+    val websiteUrl: String,
+    val privacyPolicyUrl: String,
+    val publicOfferUrl: String,
+    val supportEmail: String
+)
+
 data class AppConfig(
     val port: Int,
     val telegram: TelegramConfig,
     val openAI: OpenAIConfig,
     val database: DatabaseConfig,
     val billing: BillingConfig,
+    val help: HelpConfig,
     val logRetentionDays: Long,
     val environment: String
 )
@@ -254,6 +262,13 @@ object Env {
             reminderDays = reminderDays
         )
 
+        val help = HelpConfig(
+            websiteUrl = tracker.get("HELP_WEBSITE_URL").orEmpty(),
+            privacyPolicyUrl = tracker.get("HELP_PRIVACY_URL").orEmpty(),
+            publicOfferUrl = tracker.get("HELP_OFFER_URL").orEmpty(),
+            supportEmail = tracker.get("SUPPORT_EMAIL").orEmpty()
+        )
+
         val logRetention = tracker.get("LOG_RETENTION_DAYS") { DEFAULT_LOG_RETENTION_DAYS.toString() }
             ?.toLongOrNull()
             ?: DEFAULT_LOG_RETENTION_DAYS
@@ -264,6 +279,7 @@ object Env {
             openAI = openAI,
             database = database,
             billing = billing,
+            help = help,
             logRetentionDays = logRetention,
             environment = appEnv
         )

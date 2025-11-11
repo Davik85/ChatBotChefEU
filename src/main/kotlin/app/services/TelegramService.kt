@@ -94,7 +94,7 @@ class TelegramService(
         }
     }
 
-    fun languageMenu(): InlineKeyboardMarkup = InlineKeyboardMarkup(
+    fun languageMenu(language: String): InlineKeyboardMarkup = InlineKeyboardMarkup(
         listOf(
             listOf(
                 btn(LanguageSupport.inlineLabel("en"), "lang:set:en"),
@@ -104,7 +104,7 @@ class TelegramService(
             listOf(
                 btn(LanguageSupport.inlineLabel("es"), "lang:set:es"),
                 btn(LanguageSupport.inlineLabel("fr"), "lang:set:fr"),
-                btn("\uD83C\uDF0D Other", "lang:other")
+                btn(i18n.translate(language, "lang.other.button"), "lang:other")
             )
         )
     )
