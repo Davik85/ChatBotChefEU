@@ -12,6 +12,7 @@ import app.prompts.Prompts
 import app.services.ConversationMode
 import app.util.LanguageCallbackAction
 import app.util.detectLanguageByGreeting
+import app.util.detectLanguageByName
 import app.util.parseLanguageCallbackData
 import app.util.MainMenuAction
 import app.util.parseMainMenuCallbackData
@@ -192,10 +193,16 @@ class UpdateProcessor(
         fallbackLanguageCode: String?
     ) {
         val language = i18n.resolveLanguage(user.locale)
+        val supportedLanguages = LanguageSupport.supportedLanguageList()
         val detected = detectLanguageByGreeting(text)
+            ?: detectLanguageByName(text)
             ?: normalizeLocale(fallbackLanguageCode)
         if (detected == null) {
-            val response = i18n.translate(language, "lang.other.unknown")
+            val response = i18n.translate(
+                language,
+                "lang.other.unknown",
+                mapOf("languages" to supportedLanguages)
+            )
             telegramService.safeSendMessage(chatId, response)
             return
         }
@@ -203,7 +210,11 @@ class UpdateProcessor(
             val fallback = i18n.defaultLanguage()
             userService.updateLocale(user.telegramId, fallback)
             userService.updateConversationState(user.telegramId, null)
-            val unsupported = i18n.translate(fallback, "lang.other.unsupported")
+            val unsupported = i18n.translate(
+                fallback,
+                "lang.other.unsupported",
+                mapOf("languages" to supportedLanguages)
+            )
             telegramService.safeSendMessage(chatId, unsupported)
             user.mode = null
             userService.updateMode(user.telegramId, null)
@@ -214,7 +225,11 @@ class UpdateProcessor(
         userService.updateLocale(user.telegramId, detected)
         userService.updateConversationState(user.telegramId, null)
         val responseLanguage = i18n.resolveLanguage(detected)
-        val confirmation = i18n.translate(responseLanguage, "lang.other.confirm", mapOf("langName" to LanguageSupport.nativeName(detected)))
+        val confirmation = i18n.translate(
+            responseLanguage,
+            "lang.other.confirm",
+            mapOf("langName" to LanguageSupport.nativeName(detected))
+        )
         telegramService.safeSendMessage(chatId, confirmation)
         user.mode = null
         userService.updateMode(user.telegramId, null)

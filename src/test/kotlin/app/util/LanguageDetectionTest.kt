@@ -22,4 +22,22 @@ class LanguageDetectionTest {
         val detected = detectLanguageByGreeting("Goodbye")
         assertNull(detected)
     }
+
+    @Test
+    fun `detects language by native name`() {
+        val detected = detectLanguageByName("Português")
+        assertEquals("pt", detected)
+    }
+
+    @Test
+    fun `detects language by code`() {
+        val detected = detectLanguageByName("uk")
+        assertEquals("uk", detected)
+    }
+
+    @Test
+    fun `returns null when language name is unsupported`() {
+        val detected = detectLanguageByName("Klingon")
+        assertNull(detected)
+    }
 }
