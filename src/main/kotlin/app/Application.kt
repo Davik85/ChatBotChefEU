@@ -63,7 +63,8 @@ fun main() {
         openAIClient = openAIClient,
         billingConfig = config.billing,
         adminService = adminService,
-        adminIds = config.telegram.adminIds
+        adminIds = config.telegram.adminIds,
+        helpConfig = config.help
     )
     val deduplicationService = DeduplicationService()
     val reminderService = ReminderService(config.billing, premiumService, userService, telegramService, i18n)

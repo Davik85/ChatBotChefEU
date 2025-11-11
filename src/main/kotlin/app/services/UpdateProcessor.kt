@@ -1,6 +1,7 @@
 package app.services
 
 import app.BillingConfig
+import app.HelpConfig
 import app.I18n
 import app.LanguageSupport
 import app.TelegramParseMode
@@ -40,7 +41,8 @@ class UpdateProcessor(
     private val openAIClient: OpenAIClient,
     private val billingConfig: BillingConfig,
     private val adminService: AdminService,
-    private val adminIds: Set<Long>
+    private val adminIds: Set<Long>,
+    private val helpConfig: HelpConfig
 ) : UpdateHandler {
     private val logger = LoggerFactory.getLogger(UpdateProcessor::class.java)
 
@@ -125,8 +127,7 @@ class UpdateProcessor(
     }
 
     private suspend fun handleHelp(chatId: Long, language: String) {
-        val helpText = i18n.translate(language, "mode.help.text")
-        telegramService.safeSendMessage(chatId, helpText)
+        telegramService.safeSendMessage(chatId, helpMessage(language))
     }
 
     private suspend fun handleLanguageMenu(chatId: Long, language: String) {
@@ -234,11 +235,17 @@ class UpdateProcessor(
             user.lastMenuMessageId = messageId
             userService.updateLastMenuMessageId(user.telegramId, messageId)
         }
+        if (action == MainMenuAction.Help) {
+            telegramService.answerCallback(callbackId, null)
+            telegramService.safeSendMessage(chatId, helpMessage(language))
+            return
+        }
+
         val (mode, activationKey) = when (action) {
             MainMenuAction.Recipes -> ConversationMode.RECIPES to "mode.recipes.activated"
             MainMenuAction.Calorie -> ConversationMode.CALORIE to "mode.calorie.activated"
             MainMenuAction.Ingredient -> ConversationMode.INGREDIENT to "mode.ingredient.activated"
-            MainMenuAction.Help -> ConversationMode.HELP to "mode.help.activated"
+            MainMenuAction.Help -> error("Help action should have been handled before mode activation")
         }
         activateMode(callbackId, chatId, user, userId, language, mode, activationKey)
     }
@@ -328,7 +335,7 @@ class UpdateProcessor(
 
     private suspend fun showLanguageMenu(chatId: Long, language: String) {
         val prompt = i18n.translate(language, "menu.language.title")
-        telegramService.safeSendMessage(chatId, prompt, telegramService.languageMenu())
+        telegramService.safeSendMessage(chatId, prompt, telegramService.languageMenu(language))
     }
 
     private fun normalizeLocale(raw: String?): String? {
@@ -425,11 +432,9 @@ class UpdateProcessor(
         }
         user.mode = activeMode
         if (activeMode == ConversationMode.HELP) {
-            val helpText = i18n.translate(language, "mode.help.text")
-            telegramService.safeSendMessage(chatId, helpText)
+            telegramService.safeSendMessage(chatId, helpMessage(language))
             userService.updateMode(userId, null)
             user.mode = null
-            showMainMenu(user, chatId, language, includeImage = false)
             return
         }
 
@@ -487,5 +492,14 @@ class UpdateProcessor(
         val text = i18n.translate(language, key)
         telegramService.safeSendMessage(chatId, text)
     }
+
+    private fun helpMessage(language: String): String = i18n.translate(language, "help.body", helpVariables())
+
+    private fun helpVariables(): Map<String, String> = mapOf(
+        "website" to helpConfig.websiteUrl,
+        "privacy" to helpConfig.privacyPolicyUrl,
+        "offer" to helpConfig.publicOfferUrl,
+        "support_email" to helpConfig.supportEmail
+    ).mapValues { (_, value) -> value.ifBlank { "-" } }
 
 }
