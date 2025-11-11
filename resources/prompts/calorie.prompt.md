@@ -20,13 +20,18 @@ Output (clean, short):
 Goal: {goal}.
 
 🔹 1) BMR:
+
 🔹 2) Activity factor:
+
 🔹 TDEE (maintenance):
+
 🔹 3) Goal adjustment:
+
 🔹 4) Macros split:
+
 🔹 5) Final daily plan:
 
-Notes:
+Give Notes:
 - Accept ±5% uncertainty. Add a one-sentence how-to.
 - If data is missing, list required fields on one line and ask to send all in one message.
 - End with: "Back to recipes? Type /start 🍳"
