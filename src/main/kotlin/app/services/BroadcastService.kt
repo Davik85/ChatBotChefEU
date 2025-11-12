@@ -16,14 +16,15 @@ class BroadcastService(
 
     data class Result(val total: Int, val delivered: Int, val failed: Int)
 
-    suspend fun dispatch(adminId: Long, targetIds: List<Long>, message: String): Result {
+    suspend fun dispatch(adminId: Long, targetIds: List<Long>, payload: BroadcastPayload): Result {
         val distinctTargets = targetIds.distinct()
         var delivered = 0
         var failed = 0
         logger.info(
-            "Admin {} started broadcast to {} users",
+            "Admin {} started broadcast to {} users type={}",
             adminId,
-            distinctTargets.size
+            distinctTargets.size,
+            payload.javaClass.simpleName
         )
         val chunks = distinctTargets.chunked(batchSize)
         chunks.forEachIndexed { index, chunk ->
@@ -32,10 +33,9 @@ class BroadcastService(
                 var success = false
                 while (attempt <= maxRetries && !success) {
                     attempt++
-                    val messageId = telegramService.safeSendMessage(chatId, message)
-                    if (messageId != null) {
+                    success = telegramService.sendBroadcastPayload(chatId, payload)
+                    if (success) {
                         delivered++
-                        success = true
                     } else if (attempt <= maxRetries) {
                         delay(retryDelay.toMillis())
                     }

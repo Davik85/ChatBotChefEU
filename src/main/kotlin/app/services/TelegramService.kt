@@ -128,6 +128,17 @@ class TelegramService(
         )
     )
 
+    fun adminBroadcastTypeKeyboard(language: String): InlineKeyboardMarkup = InlineKeyboardMarkup(
+        listOf(
+            listOf(
+                btn(i18n.translate(language, "admin.broadcast.type.text"), "admin:broadcast_type:text"),
+                btn(i18n.translate(language, "admin.broadcast.type.photo"), "admin:broadcast_type:photo"),
+                btn(i18n.translate(language, "admin.broadcast.type.video"), "admin:broadcast_type:video")
+            ),
+            listOf(btn(i18n.translate(language, "admin.common.cancel_button"), "admin:cancel"))
+        )
+    )
+
     fun adminBroadcastPreviewKeyboard(language: String): InlineKeyboardMarkup = InlineKeyboardMarkup(
         listOf(
             listOf(btn(i18n.translate(language, "admin.broadcast.send"), "admin:broadcast_send")),
@@ -167,24 +178,6 @@ class TelegramService(
             if (ex is CancellationException) throw ex
             logger.warn("Failed to delete message chat={} messageId={} error={}", chatId, messageId, ex.message)
             false
-        }
-    }
-
-    suspend fun broadcast(adminId: Long, targetIds: List<Long>, message: String, parseMode: TelegramParseMode?) {
-        logger.info("Admin {} triggered broadcast to {} users", adminId, targetIds.size)
-        targetIds.forEach { chatId ->
-            val outbound = OutMessage(
-                chatId = chatId,
-                text = message,
-                parseMode = when (parseMode) {
-                    TelegramParseMode.HTML -> ParseMode.HTML
-                    TelegramParseMode.MARKDOWN -> ParseMode.MARKDOWN
-                    else -> null
-                },
-                disableWebPagePreview = true
-            )
-            runCatching { telegramClient.sendMessage(outbound) }
-                .onFailure { logger.warn("Broadcast to {} failed: {}", chatId, it.message) }
         }
     }
 
@@ -232,14 +225,15 @@ class TelegramService(
 
     private fun btn(text: String, data: String) = InlineKeyboardButton(text = text, callbackData = data)
 
-    private suspend fun safeSendPhoto(
+    suspend fun safeSendPhoto(
         chatId: Long,
         photo: InputFile,
         caption: String? = null,
         replyMarkup: Any? = null
     ): Long? {
+        val (finalCaption, parseMode) = prepareCaption(caption)
         return try {
-            val message = telegramClient.sendPhoto(chatId, photo, caption, replyMarkup)
+            val message = telegramClient.sendPhoto(chatId, photo, finalCaption, parseMode, replyMarkup)
             if (message == null) {
                 logger.warn("Telegram sendPhoto returned null for chat={} source={}", chatId, describePhoto(photo))
                 return null
@@ -252,9 +246,54 @@ class TelegramService(
         }
     }
 
+    suspend fun safeSendVideo(
+        chatId: Long,
+        video: InputFile,
+        caption: String? = null,
+        replyMarkup: Any? = null
+    ): Long? {
+        val (finalCaption, parseMode) = prepareCaption(caption)
+        return try {
+            val message = telegramClient.sendVideo(chatId, video, finalCaption, parseMode, replyMarkup)
+            if (message == null) {
+                logger.warn("Telegram sendVideo returned null for chat={} source={}", chatId, describeVideo(video))
+                return null
+            }
+            message.message_id
+        } catch (ex: Exception) {
+            if (ex is CancellationException) throw ex
+            logger.warn("Failed to send video chat={} source={} error={}", chatId, describeVideo(video), ex.message)
+            null
+        }
+    }
+
+    suspend fun sendBroadcastPayload(chatId: Long, payload: BroadcastPayload): Boolean {
+        return when (payload) {
+            is BroadcastPayload.Text -> safeSendMessage(chatId, payload.text) != null
+            is BroadcastPayload.Photo -> safeSendPhoto(chatId, InputFile.Existing(payload.fileId), payload.caption) != null
+            is BroadcastPayload.Video -> safeSendVideo(chatId, InputFile.Existing(payload.fileId), payload.caption) != null
+        }
+    }
+
+    private fun prepareCaption(caption: String?): Pair<String?, ParseMode?> {
+        val value = caption?.takeIf { it.isNotBlank() } ?: return null to null
+        return when (config.parseMode) {
+            TelegramParseMode.MARKDOWN -> value to ParseMode.MARKDOWN
+            TelegramParseMode.HTML -> sanitizeHtml(value)
+            else -> value to null
+        }
+    }
+
     private fun describePhoto(photo: InputFile): String = when (photo) {
         is InputFile.Url -> "url"
         is InputFile.Bytes -> "bytes(${photo.filename},${photo.bytes.size})"
+        is InputFile.Existing -> "existing"
+    }
+
+    private fun describeVideo(video: InputFile): String = when (video) {
+        is InputFile.Url -> "url"
+        is InputFile.Bytes -> "bytes(${video.filename},${video.bytes.size})"
+        is InputFile.Existing -> "existing"
     }
 
     private fun preview(text: String): String =

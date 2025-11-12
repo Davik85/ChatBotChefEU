@@ -49,6 +49,7 @@ class TelegramClient(
         chatId: Long,
         photo: InputFile,
         caption: String? = null,
+        parseMode: ParseMode? = null,
         replyMarkup: Any? = null
     ): Message? {
         when (photo) {
@@ -60,10 +61,32 @@ class TelegramClient(
                 if (!caption.isNullOrBlank()) {
                     payload["caption"] = caption
                 }
+                if (parseMode != null) {
+                    payload["parse_mode"] = parseModeValue(parseMode)
+                }
                 if (replyMarkup != null) {
                     payload["reply_markup"] = replyMarkup
                 }
                 logOutbound("sendPhoto", payload)
+                return executePostForResult("sendPhoto", payload, Message::class.java)
+            }
+            is InputFile.Existing -> {
+                val payload = mutableMapOf<String, Any>(
+                    "chat_id" to chatId,
+                    "photo" to photo.fileId
+                )
+                if (!caption.isNullOrBlank()) {
+                    payload["caption"] = caption
+                }
+                if (parseMode != null) {
+                    payload["parse_mode"] = parseModeValue(parseMode)
+                }
+                if (replyMarkup != null) {
+                    payload["reply_markup"] = replyMarkup
+                }
+                val logPayload = payload.toMutableMap()
+                logPayload["photo"] = "existing"
+                logOutbound("sendPhoto", logPayload)
                 return executePostForResult("sendPhoto", payload, Message::class.java)
             }
             is InputFile.Bytes -> {
@@ -77,6 +100,9 @@ class TelegramClient(
                 )
                 if (!caption.isNullOrBlank()) {
                     bodyBuilder.addFormDataPart("caption", caption)
+                }
+                if (parseMode != null) {
+                    bodyBuilder.addFormDataPart("parse_mode", parseModeValue(parseMode))
                 }
                 if (replyMarkup != null) {
                     val markupJson = mapper.writeValueAsString(replyMarkup)
@@ -92,6 +118,84 @@ class TelegramClient(
                     )
                 )
                 return executeMultipartForResult("sendPhoto", bodyBuilder.build(), Message::class.java)
+            }
+        }
+        return null
+    }
+
+    suspend fun sendVideo(
+        chatId: Long,
+        video: InputFile,
+        caption: String? = null,
+        parseMode: ParseMode? = null,
+        replyMarkup: Any? = null
+    ): Message? {
+        when (video) {
+            is InputFile.Url -> {
+                val payload = mutableMapOf<String, Any>(
+                    "chat_id" to chatId,
+                    "video" to video.value
+                )
+                if (!caption.isNullOrBlank()) {
+                    payload["caption"] = caption
+                }
+                if (parseMode != null) {
+                    payload["parse_mode"] = parseModeValue(parseMode)
+                }
+                if (replyMarkup != null) {
+                    payload["reply_markup"] = replyMarkup
+                }
+                logOutbound("sendVideo", payload)
+                return executePostForResult("sendVideo", payload, Message::class.java)
+            }
+            is InputFile.Existing -> {
+                val payload = mutableMapOf<String, Any>(
+                    "chat_id" to chatId,
+                    "video" to video.fileId
+                )
+                if (!caption.isNullOrBlank()) {
+                    payload["caption"] = caption
+                }
+                if (parseMode != null) {
+                    payload["parse_mode"] = parseModeValue(parseMode)
+                }
+                if (replyMarkup != null) {
+                    payload["reply_markup"] = replyMarkup
+                }
+                val logPayload = payload.toMutableMap()
+                logPayload["video"] = "existing"
+                logOutbound("sendVideo", logPayload)
+                return executePostForResult("sendVideo", payload, Message::class.java)
+            }
+            is InputFile.Bytes -> {
+                val bodyBuilder = MultipartBody.Builder().setType(MultipartBody.FORM)
+                bodyBuilder.addFormDataPart("chat_id", chatId.toString())
+                val mediaType = video.contentType.toMediaType()
+                bodyBuilder.addFormDataPart(
+                    "video",
+                    video.filename,
+                    video.bytes.toRequestBody(mediaType)
+                )
+                if (!caption.isNullOrBlank()) {
+                    bodyBuilder.addFormDataPart("caption", caption)
+                }
+                if (parseMode != null) {
+                    bodyBuilder.addFormDataPart("parse_mode", parseModeValue(parseMode))
+                }
+                if (replyMarkup != null) {
+                    val markupJson = mapper.writeValueAsString(replyMarkup)
+                    bodyBuilder.addFormDataPart("reply_markup", markupJson)
+                }
+                logOutbound(
+                    "sendVideo",
+                    mapOf(
+                        "chat_id" to chatId,
+                        "video" to "bytes(${video.filename},${video.bytes.size})",
+                        "caption" to (caption ?: ""),
+                        "reply_markup" to if (replyMarkup != null) "present" else "null"
+                    )
+                )
+                return executeMultipartForResult("sendVideo", bodyBuilder.build(), Message::class.java)
             }
         }
         return null
@@ -374,6 +478,11 @@ class TelegramClient(
             responseBody
         )
     }
+}
+
+private fun parseModeValue(parseMode: ParseMode): String = when (parseMode) {
+    ParseMode.HTML -> "HTML"
+    ParseMode.MARKDOWN -> "Markdown"
 }
 
 internal fun buildSendMessageParams(m: OutMessage): Map<String, Any> {

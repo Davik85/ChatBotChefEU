@@ -6,8 +6,9 @@ import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
 sealed class AdminConversationState {
-    object AwaitingBroadcastText : AdminConversationState()
-    data class BroadcastPreview(val text: String) : AdminConversationState()
+    object AwaitingBroadcastType : AdminConversationState()
+    data class AwaitingBroadcastContent(val type: AdminBroadcastType) : AdminConversationState()
+    data class BroadcastPreview(val payload: BroadcastPayload) : AdminConversationState()
     object AwaitingUserStatus : AdminConversationState()
     object AwaitingGrantPremium : AdminConversationState()
 }

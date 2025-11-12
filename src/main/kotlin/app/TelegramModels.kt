@@ -17,9 +17,11 @@ data class Message(
     val chat: Chat,
     val date: Long,
     val text: String? = null,
+    val caption: String? = null,
     @JsonProperty("reply_to_message") val replyToMessage: Message? = null,
     val document: Document? = null,
     val photo: List<PhotoSize>? = null,
+    val video: Video? = null,
     val entities: List<MessageEntity>? = null
 )
 
@@ -44,6 +46,9 @@ data class Document(val file_id: String)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class PhotoSize(val file_id: String)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class Video(val file_id: String)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class MessageEntity(
@@ -90,6 +95,7 @@ sealed class InputFile {
         val bytes: ByteArray,
         val contentType: String = "application/octet-stream"
     ) : InputFile()
+    data class Existing(val fileId: String) : InputFile()
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
