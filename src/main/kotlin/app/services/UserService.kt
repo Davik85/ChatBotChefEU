@@ -12,7 +12,13 @@ import org.jetbrains.exposed.sql.update
 import java.time.Instant
 import java.time.ZoneOffset
 
-enum class ConversationState { AWAITING_GREETING }
+enum class ConversationState {
+    AWAITING_GREETING,
+    ADMIN_AWAITING_BROADCAST_TEXT,
+    ADMIN_CONFIRM_BROADCAST,
+    ADMIN_AWAITING_USER_STATUS,
+    ADMIN_AWAITING_GRANT_PREMIUM
+}
 
 data class UserProfile(
     val telegramId: Long,

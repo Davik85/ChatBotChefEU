@@ -118,6 +118,23 @@ class TelegramService(
         )
     )
 
+    fun adminMenu(language: String): InlineKeyboardMarkup = InlineKeyboardMarkup(
+        listOf(
+            listOf(btn(i18n.translate(language, "admin.menu.stats"), "admin:stats")),
+            listOf(btn(i18n.translate(language, "admin.menu.broadcast"), "admin:broadcast")),
+            listOf(btn(i18n.translate(language, "admin.menu.user_status"), "admin:user_status")),
+            listOf(btn(i18n.translate(language, "admin.menu.grant_premium"), "admin:grant_premium")),
+            listOf(btn(i18n.translate(language, "admin.menu.lang_stats"), "admin:lang_stats"))
+        )
+    )
+
+    fun adminBroadcastPreviewKeyboard(language: String): InlineKeyboardMarkup = InlineKeyboardMarkup(
+        listOf(
+            listOf(btn(i18n.translate(language, "admin.broadcast.send"), "admin:broadcast_send")),
+            listOf(btn(i18n.translate(language, "admin.common.cancel_button"), "admin:cancel"))
+        )
+    )
+
     suspend fun removeInlineKeyboard(chatId: Long, messageId: Long) {
         val emptyMarkup = InlineKeyboardMarkup(emptyList())
         runCatching { telegramClient.editMessageReplyMarkup(chatId, messageId, emptyMarkup) }
