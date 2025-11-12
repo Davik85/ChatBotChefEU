@@ -53,6 +53,8 @@ fun main() {
     val userService = UserService()
     val messageHistoryService = MessageHistoryService()
     val adminService = AdminService()
+    val adminConversationStateService = AdminConversationStateService()
+    val broadcastService = BroadcastService(telegramService)
     val updateProcessor = UpdateProcessor(
         i18n = i18n,
         userService = userService,
@@ -63,6 +65,8 @@ fun main() {
         openAIClient = openAIClient,
         billingConfig = config.billing,
         adminService = adminService,
+        adminConversationStateService = adminConversationStateService,
+        broadcastService = broadcastService,
         adminIds = config.telegram.adminIds,
         helpConfig = config.help
     )

@@ -4,33 +4,44 @@ import app.BillingConfig
 import app.HelpConfig
 import app.I18n
 import app.LanguageSupport
-import app.TelegramParseMode
+import app.TelegramUser
 import app.Update
 import app.openai.ChatMessage
 import app.openai.OpenAIClient
 import app.prompts.Prompts
 import app.services.ConversationMode
+import app.util.AdminCallbackAction
 import app.util.LanguageCallbackAction
 import app.util.detectLanguageByGreeting
 import app.util.detectLanguageByName
+import app.util.parseAdminCallbackData
 import app.util.parseLanguageCallbackData
 import app.util.MainMenuAction
 import app.util.parseMainMenuCallbackData
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeFormatterBuilder
+import java.time.temporal.ChronoField
 import org.slf4j.LoggerFactory
 
 private const val ROLE_USER = "user"
 private const val ROLE_ASSISTANT = "assistant"
-private const val COMMAND_GRANT_PREMIUM = "/grantpremium"
+private const val COMMAND_ADMIN = "/admin"
+private const val COMMAND_WHOAMI = "/whoami"
 private const val COMMAND_PREMIUM_STATUS = "/premiumstatus"
-private const val COMMAND_BROADCAST = "/broadcast"
-private const val COMMAND_ADMIN_STATS = "/adminstats"
 private const val COMMAND_LANGUAGE = "/language"
 private const val COMMAND_START = "/start"
 private const val COMMAND_HELP = "/help"
 private val DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneId.of("UTC"))
+private val DATE_TIME_FORMATTER = DateTimeFormatterBuilder()
+    .append(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+    .appendLiteral(' ')
+    .appendValue(ChronoField.HOUR_OF_DAY, 2)
+    .appendLiteral(':')
+    .appendValue(ChronoField.MINUTE_OF_HOUR, 2)
+    .toFormatter()
+    .withZone(ZoneId.of("UTC"))
 
 class UpdateProcessor(
     private val i18n: I18n,
@@ -42,6 +53,8 @@ class UpdateProcessor(
     private val openAIClient: OpenAIClient,
     private val billingConfig: BillingConfig,
     private val adminService: AdminService,
+    private val adminConversationStateService: AdminConversationStateService,
+    private val broadcastService: BroadcastService,
     private val adminIds: Set<Long>,
     private val helpConfig: HelpConfig
 ) : UpdateHandler {
@@ -88,10 +101,16 @@ class UpdateProcessor(
             trimmedText.startsWith(COMMAND_LANGUAGE) -> handleLanguageMenu(chatId, language)
             trimmedText.equals("Change language", ignoreCase = true) -> handleLanguageMenu(chatId, language)
             trimmedText.startsWith(COMMAND_PREMIUM_STATUS) -> handlePremiumStatus(chatId, userId, language)
-            trimmedText.startsWith(COMMAND_GRANT_PREMIUM) -> handleGrantPremium(userId, trimmedText, language, chatId)
-            trimmedText.startsWith(COMMAND_ADMIN_STATS) -> handleAdminStats(userId, chatId, language)
-            trimmedText.startsWith(COMMAND_BROADCAST) -> handleBroadcast(userId, trimmedText, language, chatId)
-            else -> handleContentMessage(user, chatId, trimmedText, language)
+            trimmedText.startsWith(COMMAND_ADMIN) -> {
+                handleAdminCommand(userId, chatId, language)
+            }
+            trimmedText.startsWith(COMMAND_WHOAMI) -> handleWhoAmI(chatId, message.from, language)
+            else -> {
+                if (handleAdminConversationMessage(user, chatId, trimmedText, language)) {
+                    return
+                }
+                handleContentMessage(user, chatId, trimmedText, language)
+            }
         }
     }
 
@@ -106,6 +125,11 @@ class UpdateProcessor(
         val mainMenuAction = parseMainMenuCallbackData(data)
         if (mainMenuAction != null) {
             handleMainMenuSelection(callbackId, chatId, messageId, userId, mainMenuAction)
+            return
+        }
+        val adminAction = parseAdminCallbackData(data)
+        if (adminAction != null) {
+            handleAdminCallback(callbackId, userId, chatId, adminAction)
             return
         }
         val action = parseLanguageCallbackData(data) ?: return
@@ -368,75 +392,319 @@ class UpdateProcessor(
         telegramService.safeSendMessage(chatId, response)
     }
 
-    private suspend fun handleGrantPremium(requesterId: Long, text: String, language: String, chatId: Long) {
-        if (!adminIds.contains(requesterId)) {
-            sendText(chatId, language, "not_authorized")
-            return
-        }
-        val parts = text.split(" ")
-        if (parts.size < 3) {
-            sendText(chatId, language, "premium_invalid_command")
-            return
-        }
-        val targetId = parts[1].toLongOrNull()
-        val days = parts[2].toLongOrNull()
-        if (targetId == null || days == null) {
-            sendText(chatId, language, "premium_invalid_command")
-            return
-        }
-        val expiry = premiumService.grantPremium(targetId, days)
-        val message = i18n.translate(language, "premium_granted", mapOf("date" to DATE_FORMATTER.format(expiry)))
-        telegramService.safeSendMessage(chatId, message)
-    }
-
-    private suspend fun handleAdminStats(requesterId: Long, chatId: Long, language: String) {
-        if (!adminIds.contains(requesterId)) {
-            sendText(chatId, language, "not_authorized")
-            return
-        }
-        val stats = adminService.collectStats()
+    private suspend fun handleWhoAmI(chatId: Long, from: TelegramUser?, language: String) {
+        val user = from ?: return
+        val username = user.username?.let { "@${it}" } ?: "-"
+        val firstName = user.first_name?.takeIf { it.isNotBlank() } ?: "-"
         val message = i18n.translate(
             language,
-            "admin_stats",
+            "whoami.you_are",
             mapOf(
-                "users" to stats.totalUsers.toString(),
-                "premium" to stats.premiumUsers.toString(),
-                "dau" to stats.dau7.toString()
+                "id" to user.id.toString(),
+                "username" to username,
+                "first_name" to firstName
             )
         )
         telegramService.safeSendMessage(chatId, message)
     }
 
-    private suspend fun handleBroadcast(requesterId: Long, text: String, language: String, chatId: Long) {
-        if (!adminIds.contains(requesterId)) {
+    private suspend fun handleAdminCommand(userId: Long, chatId: Long, language: String) {
+        if (!isAdmin(userId)) {
+            logger.warn("Non-admin {} attempted to access /admin", userId)
             sendText(chatId, language, "not_authorized")
             return
         }
-        val payload = text.removePrefix(COMMAND_BROADCAST).trim()
-        if (payload.isBlank()) {
-            sendText(chatId, language, "broadcast_usage")
-            return
-        }
-        val parts = payload.split(" ", limit = 2)
-        val (modeCandidate, message) = if (parts.size == 2 && (parts[0].equals("markdown", true) || parts[0].equals("html", true))) {
-            parts[0].uppercase() to parts[1]
-        } else {
-            null to payload
-        }
-        if (message.isBlank()) {
-            sendText(chatId, language, "broadcast_usage")
-            return
-        }
-        val parseMode = when (modeCandidate) {
-            "MARKDOWN" -> TelegramParseMode.MARKDOWN
-            "HTML" -> TelegramParseMode.HTML
-            else -> null
-        }
-        val targetIds = userService.listAllUserIds()
-        telegramService.broadcast(requesterId, targetIds, message, parseMode)
-        val confirmation = i18n.translate(language, "broadcast_ack", mapOf("count" to targetIds.size.toString()))
-        telegramService.safeSendMessage(chatId, confirmation)
+        clearAdminState(userId)
+        val title = i18n.translate(language, "admin.menu.title")
+        val keyboard = telegramService.adminMenu(language)
+        telegramService.safeSendMessage(chatId, title, keyboard)
+        logger.info("Admin {} opened admin menu", userId)
     }
+
+    private suspend fun handleAdminCallback(
+        callbackId: String,
+        userId: Long,
+        chatId: Long,
+        action: AdminCallbackAction
+    ) {
+        val user = userService.ensureUser(userId, null)
+        val language = i18n.resolveLanguage(user.locale)
+        if (!isAdmin(userId)) {
+            val warning = i18n.translate(language, "not_authorized")
+            telegramService.answerCallback(callbackId, warning)
+            logger.warn("Non-admin {} triggered admin callback {}", userId, action)
+            return
+        }
+        telegramService.answerCallback(callbackId, null)
+        when (action) {
+            AdminCallbackAction.Stats -> handleAdminStatsAction(userId, chatId, language)
+            AdminCallbackAction.Broadcast -> handleAdminBroadcastPrompt(userId, chatId, language)
+            AdminCallbackAction.BroadcastSend -> handleAdminBroadcastSend(userId, chatId, language)
+            AdminCallbackAction.Cancel -> handleAdminCancel(userId, chatId, language)
+            AdminCallbackAction.UserStatus -> handleAdminUserStatusPrompt(userId, chatId, language)
+            AdminCallbackAction.GrantPremium -> handleAdminGrantPrompt(userId, chatId, language)
+            AdminCallbackAction.LanguageStats -> handleAdminLanguageStats(userId, chatId, language)
+        }
+    }
+
+    private suspend fun handleAdminStatsAction(userId: Long, chatId: Long, language: String) {
+        val stats = adminService.collectOverview()
+        val blockedValue = stats.blockedUsers?.toString() ?: i18n.translate(language, "admin.common.not_available")
+        val message = listOf(
+            i18n.translate(language, "admin.stats.total", mapOf("value" to stats.totalUsers.toString())),
+            i18n.translate(language, "admin.stats.active7", mapOf("value" to stats.active7Days.toString())),
+            i18n.translate(language, "admin.stats.active30", mapOf("value" to stats.active30Days.toString())),
+            i18n.translate(language, "admin.stats.premium", mapOf("value" to stats.activePremiumUsers.toString())),
+            i18n.translate(language, "admin.stats.blocked", mapOf("value" to blockedValue))
+        ).joinToString(separator = "\n")
+        telegramService.safeSendMessage(chatId, message)
+        logger.info("Admin {} requested stats", userId)
+    }
+
+    private suspend fun handleAdminBroadcastPrompt(userId: Long, chatId: Long, language: String) {
+        activateAdminState(userId, ConversationState.ADMIN_AWAITING_BROADCAST_TEXT, AdminConversationState.AwaitingBroadcastText)
+        sendText(chatId, language, "admin.broadcast.prompt")
+        logger.info("Admin {} awaiting broadcast text", userId)
+    }
+
+    private suspend fun handleAdminBroadcastInput(
+        user: UserProfile,
+        chatId: Long,
+        text: String,
+        language: String
+    ) {
+        val content = text.trim()
+        if (content.isEmpty()) {
+            sendText(chatId, language, "admin.broadcast.validation_empty")
+            return
+        }
+        activateAdminState(
+            user.telegramId,
+            ConversationState.ADMIN_CONFIRM_BROADCAST,
+            AdminConversationState.BroadcastPreview(content)
+        )
+        val previewHeader = i18n.translate(language, "admin.broadcast.preview")
+        val keyboard = telegramService.adminBroadcastPreviewKeyboard(language)
+        telegramService.safeSendMessage(chatId, "$previewHeader\n\n$content", keyboard)
+        logger.info("Admin {} prepared broadcast preview", user.telegramId)
+    }
+
+    private suspend fun handleAdminBroadcastSend(userId: Long, chatId: Long, language: String) {
+        val state = adminConversationStateService.get(userId)
+        if (state !is AdminConversationState.BroadcastPreview) {
+            sendText(chatId, language, "admin.broadcast.nothing_to_send")
+            clearAdminState(userId)
+            logger.warn("Admin {} attempted to send broadcast without payload", userId)
+            return
+        }
+        clearAdminState(userId)
+        val targetIds = userService.listAllUserIds()
+        val result = broadcastService.dispatch(userId, targetIds, state.text)
+        val message = i18n.translate(
+            language,
+            "admin.broadcast.result",
+            mapOf(
+                "delivered" to result.delivered.toString(),
+                "failed" to result.failed.toString(),
+                "total" to result.total.toString()
+            )
+        )
+        telegramService.safeSendMessage(chatId, message)
+        logger.info(
+            "Admin {} broadcast summary delivered={} failed={} total={}",
+            userId,
+            result.delivered,
+            result.failed,
+            result.total
+        )
+    }
+
+    private suspend fun handleAdminCancel(userId: Long, chatId: Long, language: String) {
+        clearAdminState(userId)
+        sendText(chatId, language, "admin.common.cancelled")
+        logger.info("Admin {} cancelled current action", userId)
+    }
+
+    private suspend fun handleAdminUserStatusPrompt(userId: Long, chatId: Long, language: String) {
+        activateAdminState(userId, ConversationState.ADMIN_AWAITING_USER_STATUS, AdminConversationState.AwaitingUserStatus)
+        sendText(chatId, language, "admin.user_status.prompt")
+        logger.info("Admin {} requested user status", userId)
+    }
+
+    private suspend fun handleAdminUserStatusInput(
+        user: UserProfile,
+        chatId: Long,
+        text: String,
+        language: String
+    ) {
+        val targetId = text.trim().toLongOrNull()
+        if (targetId == null) {
+            sendText(chatId, language, "admin.validation.invalid_user_id")
+            return
+        }
+        val status = adminService.findUserStatus(targetId)
+        if (status == null) {
+            sendText(chatId, language, "admin.validation.not_found")
+            return
+        }
+        clearAdminState(user.telegramId)
+        val now = Instant.now()
+        val premiumUntil = status.premiumUntil?.takeIf { it.isAfter(now) }
+        val premiumLine = if (premiumUntil != null) {
+            i18n.translate(
+                language,
+                "admin.user_status.result.premium_yes",
+                mapOf("date" to DATE_FORMATTER.format(premiumUntil))
+            )
+        } else {
+            i18n.translate(language, "admin.user_status.result.premium_no")
+        }
+        val lastActivity = status.lastActivity?.let { DATE_TIME_FORMATTER.format(it) }
+            ?: i18n.translate(language, "admin.common.not_available")
+        val localeValue = status.locale?.takeIf { it.isNotBlank() }
+            ?: i18n.translate(language, "admin.common.not_available")
+        val message = listOf(
+            i18n.translate(language, "admin.user_status.result.title", mapOf("userId" to targetId.toString())),
+            premiumLine,
+            i18n.translate(language, "admin.user_status.result.last_activity", mapOf("value" to lastActivity)),
+            i18n.translate(language, "admin.user_status.result.locale", mapOf("value" to localeValue))
+        ).joinToString("\n")
+        telegramService.safeSendMessage(chatId, message)
+        logger.info("Admin {} inspected user {}", user.telegramId, targetId)
+    }
+
+    private suspend fun handleAdminGrantPrompt(userId: Long, chatId: Long, language: String) {
+        activateAdminState(userId, ConversationState.ADMIN_AWAITING_GRANT_PREMIUM, AdminConversationState.AwaitingGrantPremium)
+        sendText(chatId, language, "admin.grant.prompt")
+        logger.info("Admin {} started grant premium flow", userId)
+    }
+
+    private suspend fun handleAdminGrantInput(
+        user: UserProfile,
+        chatId: Long,
+        text: String,
+        language: String
+    ) {
+        val parts = text.trim().split(" ")
+        if (parts.size < 2) {
+            sendText(chatId, language, "admin.validation.invalid_args")
+            return
+        }
+        val targetId = parts[0].toLongOrNull()
+        val days = parts[1].toLongOrNull()
+        if (targetId == null || days == null || days <= 0) {
+            sendText(chatId, language, "admin.validation.invalid_args")
+            return
+        }
+        val target = userService.findUser(targetId)
+        if (target == null) {
+            sendText(chatId, language, "admin.validation.not_found")
+            return
+        }
+        val expiry = premiumService.grantPremium(targetId, days)
+        clearAdminState(user.telegramId)
+        val expiryText = DATE_FORMATTER.format(expiry)
+        val confirmation = i18n.translate(language, "admin.grant.ok", mapOf("date" to expiryText))
+        telegramService.safeSendMessage(chatId, confirmation)
+        val targetLanguage = i18n.resolveLanguage(target.locale)
+        val userMessage = i18n.translate(targetLanguage, "user.premium.granted", mapOf("date" to expiryText))
+        telegramService.safeSendMessage(targetId, userMessage)
+        logger.info("Admin {} granted premium to {} for {} days", user.telegramId, targetId, days)
+    }
+
+    private suspend fun handleAdminLanguageStats(userId: Long, chatId: Long, language: String) {
+        val stats = adminService.collectLanguageStats()
+        if (stats.isEmpty()) {
+            sendText(chatId, language, "admin.lang_stats.empty")
+            return
+        }
+        val title = i18n.translate(language, "admin.lang_stats.title")
+        val unknownLabel = i18n.translate(language, "admin.lang_stats.unknown")
+        val lines = stats.map { stat ->
+            val localeLabel = if (stat.locale == "unknown") unknownLabel else stat.locale
+            i18n.translate(
+                language,
+                "admin.lang_stats.item",
+                mapOf(
+                    "locale" to localeLabel,
+                    "count" to stat.count.toString()
+                )
+            )
+        }
+        val message = buildList {
+            add(title)
+            addAll(lines)
+        }.joinToString("\n")
+        telegramService.safeSendMessage(chatId, message)
+        logger.info("Admin {} requested language stats", userId)
+    }
+
+    private suspend fun handleAdminConversationMessage(
+        user: UserProfile,
+        chatId: Long,
+        text: String,
+        language: String
+    ): Boolean {
+        val state = user.conversationState
+        if (!isAdminConversationState(state)) {
+            return false
+        }
+        if (!isAdmin(user.telegramId)) {
+            clearAdminState(user.telegramId)
+            return false
+        }
+        val adminState = adminConversationStateService.get(user.telegramId)
+        if (adminState == null) {
+            clearAdminState(user.telegramId)
+            sendText(chatId, language, "admin.common.expired")
+            logger.info("Admin {} conversation state expired", user.telegramId)
+            return true
+        }
+        return when (state) {
+            ConversationState.ADMIN_AWAITING_BROADCAST_TEXT, ConversationState.ADMIN_CONFIRM_BROADCAST -> {
+                handleAdminBroadcastInput(user, chatId, text, language)
+                true
+            }
+            ConversationState.ADMIN_AWAITING_USER_STATUS -> {
+                handleAdminUserStatusInput(user, chatId, text, language)
+                true
+            }
+            ConversationState.ADMIN_AWAITING_GRANT_PREMIUM -> {
+                handleAdminGrantInput(user, chatId, text, language)
+                true
+            }
+            else -> false
+        }
+    }
+
+    private suspend fun activateAdminState(
+        userId: Long,
+        conversationState: ConversationState,
+        adminState: AdminConversationState
+    ) {
+        adminConversationStateService.set(userId, adminState)
+        userService.updateConversationState(userId, conversationState)
+    }
+
+    private suspend fun clearAdminState(userId: Long) {
+        adminConversationStateService.clear(userId)
+        val profile = userService.findUser(userId)
+        if (isAdminConversationState(profile?.conversationState)) {
+            userService.updateConversationState(userId, null)
+        }
+    }
+
+    private fun isAdminConversationState(state: ConversationState?): Boolean {
+        return when (state) {
+            ConversationState.ADMIN_AWAITING_BROADCAST_TEXT,
+            ConversationState.ADMIN_CONFIRM_BROADCAST,
+            ConversationState.ADMIN_AWAITING_USER_STATUS,
+            ConversationState.ADMIN_AWAITING_GRANT_PREMIUM -> true
+            else -> false
+        }
+    }
+
+    private fun isAdmin(userId: Long): Boolean = adminIds.contains(userId)
 
     private suspend fun handleContentMessage(user: UserProfile, chatId: Long, text: String, language: String) {
         val userId = user.telegramId
@@ -503,8 +771,13 @@ class UpdateProcessor(
         messageHistoryService.append(userId, ROLE_ASSISTANT, assistantMessage)
     }
 
-    private suspend fun sendText(chatId: Long, language: String, key: String) {
-        val text = i18n.translate(language, key)
+    private suspend fun sendText(
+        chatId: Long,
+        language: String,
+        key: String,
+        variables: Map<String, String> = emptyMap()
+    ) {
+        val text = i18n.translate(language, key, variables)
         telegramService.safeSendMessage(chatId, text)
     }
 
