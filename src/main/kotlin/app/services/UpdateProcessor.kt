@@ -3,7 +3,9 @@ package app.services
 import app.BillingConfig
 import app.HelpConfig
 import app.I18n
+import app.InputFile
 import app.LanguageSupport
+import app.Message
 import app.TelegramUser
 import app.Update
 import app.openai.ChatMessage
@@ -78,7 +80,11 @@ class UpdateProcessor(
         val user = userService.ensureUser(userId, message.from.language_code)
         val language = i18n.resolveLanguage(user.locale)
 
-        if (message.photo != null || message.document != null) {
+        if (handleAdminConversationUpdate(user, chatId, message, language)) {
+            return
+        }
+
+        if (message.photo != null || message.document != null || message.video != null) {
             sendText(chatId, language, "only_text")
             return
         }
@@ -105,12 +111,7 @@ class UpdateProcessor(
                 handleAdminCommand(userId, chatId, language)
             }
             trimmedText.startsWith(COMMAND_WHOAMI) -> handleWhoAmI(chatId, message.from, language)
-            else -> {
-                if (handleAdminConversationMessage(user, chatId, trimmedText, language)) {
-                    return
-                }
-                handleContentMessage(user, chatId, trimmedText, language)
-            }
+            else -> handleContentMessage(user, chatId, trimmedText, language)
         }
     }
 
@@ -435,10 +436,12 @@ class UpdateProcessor(
             logger.warn("Non-admin {} triggered admin callback {}", userId, action)
             return
         }
-        telegramService.answerCallback(callbackId, null)
+        val ack = i18n.translate(language, "admin.common.ack")
+        telegramService.answerCallback(callbackId, ack)
         when (action) {
             AdminCallbackAction.Stats -> handleAdminStatsAction(userId, chatId, language)
             AdminCallbackAction.Broadcast -> handleAdminBroadcastPrompt(userId, chatId, language)
+            is AdminCallbackAction.BroadcastType -> handleAdminBroadcastTypeSelection(userId, chatId, language, action.type)
             AdminCallbackAction.BroadcastSend -> handleAdminBroadcastSend(userId, chatId, language)
             AdminCallbackAction.Cancel -> handleAdminCancel(userId, chatId, language)
             AdminCallbackAction.UserStatus -> handleAdminUserStatusPrompt(userId, chatId, language)
@@ -462,31 +465,168 @@ class UpdateProcessor(
     }
 
     private suspend fun handleAdminBroadcastPrompt(userId: Long, chatId: Long, language: String) {
-        activateAdminState(userId, ConversationState.ADMIN_AWAITING_BROADCAST_TEXT, AdminConversationState.AwaitingBroadcastText)
-        sendText(chatId, language, "admin.broadcast.prompt")
-        logger.info("Admin {} awaiting broadcast text", userId)
+        activateAdminState(userId, ConversationState.ADMIN_AWAITING_BROADCAST_TEXT, AdminConversationState.AwaitingBroadcastType)
+        sendBroadcastTypePrompt(chatId, language)
+        logger.info("Admin {} awaiting broadcast type", userId)
     }
 
-    private suspend fun handleAdminBroadcastInput(
+    private suspend fun sendBroadcastTypePrompt(chatId: Long, language: String) {
+        val prompt = i18n.translate(language, "admin.broadcast.type.title")
+        val keyboard = telegramService.adminBroadcastTypeKeyboard(language)
+        telegramService.safeSendMessage(chatId, prompt, keyboard)
+    }
+
+    private suspend fun handleAdminBroadcastTypeSelection(
+        userId: Long,
+        chatId: Long,
+        language: String,
+        type: AdminBroadcastType
+    ) {
+        activateAdminState(
+            userId,
+            ConversationState.ADMIN_AWAITING_BROADCAST_TEXT,
+            AdminConversationState.AwaitingBroadcastContent(type)
+        )
+        sendBroadcastContentPrompt(chatId, language, type)
+        logger.info("Admin {} selected broadcast type {}", userId, type)
+    }
+
+    private suspend fun handleAdminBroadcastUpdate(
         user: UserProfile,
         chatId: Long,
-        text: String,
-        language: String
+        language: String,
+        adminState: AdminConversationState,
+        message: Message
     ) {
-        val content = text.trim()
-        if (content.isEmpty()) {
-            sendText(chatId, language, "admin.broadcast.validation_empty")
+        when (adminState) {
+            is AdminConversationState.AwaitingBroadcastType -> sendBroadcastTypePrompt(chatId, language)
+            is AdminConversationState.AwaitingBroadcastContent -> handleAdminBroadcastContent(
+                user,
+                chatId,
+                language,
+                adminState.type,
+                message
+            )
+            is AdminConversationState.BroadcastPreview -> handleAdminBroadcastPrompt(user.telegramId, chatId, language)
+            else -> {}
+        }
+    }
+
+    private suspend fun handleAdminBroadcastContent(
+        user: UserProfile,
+        chatId: Long,
+        language: String,
+        type: AdminBroadcastType,
+        message: Message
+    ) {
+        when (type) {
+            AdminBroadcastType.TEXT -> {
+                val content = message.text?.trim().orEmpty()
+                if (content.isEmpty()) {
+                    sendText(chatId, language, "admin.broadcast.validation_empty")
+                    return
+                }
+                presentBroadcastPreview(user, chatId, language, BroadcastPayload.Text(content))
+            }
+            AdminBroadcastType.PHOTO -> {
+                val photo = message.photo?.lastOrNull()
+                if (photo == null || message.video != null || message.document != null) {
+                    sendBroadcastContentPrompt(chatId, language, type)
+                    return
+                }
+                val caption = message.caption?.takeIf { it.isNotBlank() }
+                presentBroadcastPreview(
+                    user,
+                    chatId,
+                    language,
+                    BroadcastPayload.Photo(photo.file_id, caption)
+                )
+            }
+            AdminBroadcastType.VIDEO -> {
+                val video = message.video
+                if (video == null || message.photo != null || message.document != null) {
+                    sendBroadcastContentPrompt(chatId, language, type)
+                    return
+                }
+                val caption = message.caption?.takeIf { it.isNotBlank() }
+                presentBroadcastPreview(
+                    user,
+                    chatId,
+                    language,
+                    BroadcastPayload.Video(video.file_id, caption)
+                )
+            }
+        }
+    }
+
+    private suspend fun presentBroadcastPreview(
+        user: UserProfile,
+        chatId: Long,
+        language: String,
+        payload: BroadcastPayload
+    ) {
+        val type = payload.type()
+        val previewTitle = i18n.translate(language, "admin.broadcast.preview.title")
+        val keyboard = telegramService.adminBroadcastPreviewKeyboard(language)
+        val messageId = when (payload) {
+            is BroadcastPayload.Text -> {
+                val text = "$previewTitle\n\n${payload.text}"
+                telegramService.safeSendMessage(chatId, text, keyboard)
+            }
+            is BroadcastPayload.Photo -> {
+                val caption = buildPreviewCaption(previewTitle, payload.caption)
+                telegramService.safeSendPhoto(chatId, InputFile.Existing(payload.fileId), caption, keyboard)
+            }
+            is BroadcastPayload.Video -> {
+                val caption = buildPreviewCaption(previewTitle, payload.caption)
+                telegramService.safeSendVideo(chatId, InputFile.Existing(payload.fileId), caption, keyboard)
+            }
+        }
+        if (messageId == null) {
+            activateAdminState(
+                user.telegramId,
+                ConversationState.ADMIN_AWAITING_BROADCAST_TEXT,
+                AdminConversationState.AwaitingBroadcastContent(type)
+            )
+            sendBroadcastContentPrompt(chatId, language, type)
+            logger.warn("Admin {} broadcast preview failed to send for type {}", user.telegramId, type)
             return
         }
         activateAdminState(
             user.telegramId,
             ConversationState.ADMIN_CONFIRM_BROADCAST,
-            AdminConversationState.BroadcastPreview(content)
+            AdminConversationState.BroadcastPreview(payload)
         )
-        val previewHeader = i18n.translate(language, "admin.broadcast.preview")
-        val keyboard = telegramService.adminBroadcastPreviewKeyboard(language)
-        telegramService.safeSendMessage(chatId, "$previewHeader\n\n$content", keyboard)
-        logger.info("Admin {} prepared broadcast preview", user.telegramId)
+        logger.info(
+            "Admin {} prepared broadcast preview type={} messageId={}",
+            user.telegramId,
+            type,
+            messageId
+        )
+    }
+
+    private suspend fun sendBroadcastContentPrompt(chatId: Long, language: String, type: AdminBroadcastType) {
+        val key = when (type) {
+            AdminBroadcastType.TEXT -> "admin.broadcast.prompt.text"
+            AdminBroadcastType.PHOTO -> "admin.broadcast.prompt.photo"
+            AdminBroadcastType.VIDEO -> "admin.broadcast.prompt.video"
+        }
+        sendText(chatId, language, key)
+    }
+
+    private fun buildPreviewCaption(previewTitle: String, caption: String?): String {
+        val trimmedCaption = caption?.takeIf { it.isNotBlank() }
+        return if (trimmedCaption != null) {
+            "$previewTitle\n\n$trimmedCaption"
+        } else {
+            previewTitle
+        }
+    }
+
+    private fun BroadcastPayload.type(): AdminBroadcastType = when (this) {
+        is BroadcastPayload.Text -> AdminBroadcastType.TEXT
+        is BroadcastPayload.Photo -> AdminBroadcastType.PHOTO
+        is BroadcastPayload.Video -> AdminBroadcastType.VIDEO
     }
 
     private suspend fun handleAdminBroadcastSend(userId: Long, chatId: Long, language: String) {
@@ -499,7 +639,7 @@ class UpdateProcessor(
         }
         clearAdminState(userId)
         val targetIds = userService.listAllUserIds()
-        val result = broadcastService.dispatch(userId, targetIds, state.text)
+        val result = broadcastService.dispatch(userId, targetIds, state.payload)
         val message = i18n.translate(
             language,
             "admin.broadcast.result",
@@ -639,10 +779,10 @@ class UpdateProcessor(
         logger.info("Admin {} requested language stats", userId)
     }
 
-    private suspend fun handleAdminConversationMessage(
+    private suspend fun handleAdminConversationUpdate(
         user: UserProfile,
         chatId: Long,
-        text: String,
+        message: Message,
         language: String
     ): Boolean {
         val state = user.conversationState
@@ -660,20 +800,31 @@ class UpdateProcessor(
             logger.info("Admin {} conversation state expired", user.telegramId)
             return true
         }
-        return when (state) {
-            ConversationState.ADMIN_AWAITING_BROADCAST_TEXT, ConversationState.ADMIN_CONFIRM_BROADCAST -> {
-                handleAdminBroadcastInput(user, chatId, text, language)
-                true
+        when (state) {
+            ConversationState.ADMIN_AWAITING_BROADCAST_TEXT,
+            ConversationState.ADMIN_CONFIRM_BROADCAST -> {
+                handleAdminBroadcastUpdate(user, chatId, language, adminState, message)
+                return true
             }
             ConversationState.ADMIN_AWAITING_USER_STATUS -> {
-                handleAdminUserStatusInput(user, chatId, text, language)
-                true
+                val text = message.text?.trim()
+                if (text.isNullOrEmpty()) {
+                    sendText(chatId, language, "admin.user_status.prompt")
+                } else {
+                    handleAdminUserStatusInput(user, chatId, text, language)
+                }
+                return true
             }
             ConversationState.ADMIN_AWAITING_GRANT_PREMIUM -> {
-                handleAdminGrantInput(user, chatId, text, language)
-                true
+                val text = message.text?.trim()
+                if (text.isNullOrEmpty()) {
+                    sendText(chatId, language, "admin.grant.prompt")
+                } else {
+                    handleAdminGrantInput(user, chatId, text, language)
+                }
+                return true
             }
-            else -> false
+            else -> return false
         }
     }
 
@@ -721,25 +872,27 @@ class UpdateProcessor(
             return
         }
 
-        val premium = premiumService.isPremiumActive(userId)
-        if (!premium) {
-            val usage = usageService.getUsage(userId)
-            if (usage >= billingConfig.freeTotalLimit) {
-                val message = i18n.translate(
-                    language,
-                    "limit_reached",
-                    mapOf(
-                        "limit" to billingConfig.freeTotalLimit.toString(),
-                        "price" to billingConfig.premiumPrice.toPlainString(),
-                        "duration" to billingConfig.premiumDurationDays.toString()
+        if (!isAdmin(userId)) {
+            val premium = premiumService.isPremiumActive(userId)
+            if (!premium) {
+                val usage = usageService.getUsage(userId)
+                if (usage >= billingConfig.freeTotalLimit) {
+                    val message = i18n.translate(
+                        language,
+                        "limit_reached",
+                        mapOf(
+                            "limit" to billingConfig.freeTotalLimit.toString(),
+                            "price" to billingConfig.premiumPrice.toPlainString(),
+                            "duration" to billingConfig.premiumDurationDays.toString()
+                        )
                     )
-                )
-                telegramService.safeSendMessage(chatId, message)
-                return
+                    telegramService.safeSendMessage(chatId, message)
+                    return
+                }
             }
+            usageService.incrementUsage(userId)
         }
 
-        usageService.incrementUsage(userId)
         val history = messageHistoryService.loadRecent(userId)
         messageHistoryService.append(userId, ROLE_USER, text)
 
