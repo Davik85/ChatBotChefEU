@@ -7,7 +7,7 @@ import java.time.Duration
 import org.slf4j.LoggerFactory
 
 private const val DEFAULT_PORT = 8081
-private const val DEFAULT_FREE_LIMIT = 10
+private const val DEFAULT_FREE_LIMIT = 1000
 private const val DEFAULT_PREMIUM_DURATION_DAYS = 30L
 private const val DEFAULT_PREMIUM_PRICE = 6.99
 private const val DEFAULT_LOG_RETENTION_DAYS = 14L
