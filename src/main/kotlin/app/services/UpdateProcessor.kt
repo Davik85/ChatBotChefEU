@@ -128,8 +128,8 @@ class UpdateProcessor(
         when {
             trimmedText.startsWith(COMMAND_START) -> handleStart(user, chatId, language, message.message_id)
             trimmedText.startsWith(COMMAND_HELP) -> handleHelp(chatId, language)
-            trimmedText.startsWith(COMMAND_LANGUAGE) -> handleLanguageMenu(chatId, language)
-            trimmedText.equals("Change language", ignoreCase = true) -> handleLanguageMenu(chatId, language)
+            trimmedText.startsWith(COMMAND_LANGUAGE) -> handleLanguageMenu(user, chatId, language)
+            trimmedText.equals("Change language", ignoreCase = true) -> handleLanguageMenu(user, chatId, language)
             trimmedText.startsWith(COMMAND_PREMIUM_STATUS) -> handlePremiumStatus(chatId, userId, language)
             trimmedText.startsWith(COMMAND_ADMIN) -> {
                 handleAdminCommand(userId, chatId, language)
@@ -166,17 +166,20 @@ class UpdateProcessor(
     }
 
     private suspend fun handleStart(user: UserProfile, chatId: Long, language: String, startMessageId: Long?) {
+        val awaitingLanguageSelection = user.conversationState == ConversationState.AWAITING_LANGUAGE_SELECTION
         clearStartSequence(user, chatId, deleteStartCommand = false)
         userService.updateMode(user.telegramId, null)
         user.mode = null
-        userService.updateConversationState(user.telegramId, null)
 
         val hasSupportedLocale = user.locale?.let { LanguageSupport.isSupported(it) } == true
-        if (!hasSupportedLocale) {
-            showLanguageMenu(chatId, language)
+        val needsLanguageSelection = awaitingLanguageSelection || !hasSupportedLocale
+        if (needsLanguageSelection) {
+            userService.updateConversationState(user.telegramId, ConversationState.AWAITING_LANGUAGE_SELECTION)
+            showLanguageMenu(user, chatId, language)
             return
         }
 
+        userService.updateConversationState(user.telegramId, null)
         showMainMenu(user, chatId, language, startMessageId = startMessageId, includeImage = true)
     }
 
@@ -184,8 +187,8 @@ class UpdateProcessor(
         telegramService.safeSendMessage(chatId, helpMessage(language))
     }
 
-    private suspend fun handleLanguageMenu(chatId: Long, language: String) {
-        showLanguageMenu(chatId, language)
+    private suspend fun handleLanguageMenu(user: UserProfile, chatId: Long, language: String) {
+        showLanguageMenu(user, chatId, language)
     }
 
     private suspend fun handleLanguageSelection(
@@ -401,7 +404,8 @@ class UpdateProcessor(
         }
     }
 
-    private suspend fun showLanguageMenu(chatId: Long, language: String) {
+    private suspend fun showLanguageMenu(user: UserProfile, chatId: Long, language: String) {
+        userService.updateConversationState(user.telegramId, ConversationState.AWAITING_LANGUAGE_SELECTION)
         val prompt = i18n.translate(language, "menu.language.title")
         telegramService.safeSendMessage(chatId, prompt, telegramService.languageMenu(language))
     }

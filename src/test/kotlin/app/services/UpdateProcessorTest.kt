@@ -192,7 +192,7 @@ class UpdateProcessorTest {
         val user = UserProfile(
             telegramId = 3L,
             locale = null,
-            conversationState = null,
+            conversationState = ConversationState.AWAITING_LANGUAGE_SELECTION,
             createdAt = Instant.now(),
             mode = null,
             lastMenuMessageId = null,
@@ -241,6 +241,71 @@ class UpdateProcessorTest {
         verify(userService).updateLocale(3L, "en")
         verify(telegramService, times(1)).sendWelcomeImage(3L)
         verify(telegramService, atLeast(3)).safeSendMessage(any(), any(), anyOrNull())
+    }
+
+    @Test
+    fun `start for new localized user still prompts for language`() = runBlocking {
+        val telegramService = mock<TelegramService>()
+        val userService = mock<UserService>()
+        val premiumService = mock<PremiumService>()
+        val usageService = mock<UsageService>()
+        val messageHistoryService = mock<MessageHistoryService>()
+        val openAIClient = mock<app.openai.OpenAIClient>()
+        val adminService = mock<AdminService>()
+        val broadcastService = mock<BroadcastService>()
+        val adminStateService = AdminConversationStateService()
+
+        whenever(telegramService.safeSendMessage(any(), any(), anyOrNull())).thenReturn(601L)
+        whenever(telegramService.mainMenuKeyboard(any())).thenReturn(InlineKeyboardMarkup(emptyList()))
+        whenever(telegramService.languageMenu(any())).thenReturn(InlineKeyboardMarkup(emptyList()))
+
+        val newUser = UserProfile(
+            telegramId = 5L,
+            locale = "en",
+            conversationState = ConversationState.AWAITING_LANGUAGE_SELECTION,
+            createdAt = Instant.now(),
+            mode = null,
+            lastMenuMessageId = null,
+            lastWelcomeImageMessageId = null,
+            lastWelcomeGreetingMessageId = null,
+            lastStartCommandMessageId = null
+        )
+
+        whenever(userService.ensureUser(5L, "en"))
+            .thenReturn(newUser)
+        whenever(userService.findUser(5L)).thenReturn(newUser)
+
+        val processor = UpdateProcessor(
+            i18n = i18n,
+            userService = userService,
+            premiumService = premiumService,
+            usageService = usageService,
+            messageHistoryService = messageHistoryService,
+            telegramService = telegramService,
+            openAIClient = openAIClient,
+            billingConfig = billingConfig,
+            adminService = adminService,
+            adminConversationStateService = adminStateService,
+            broadcastService = broadcastService,
+            adminIds = emptySet(),
+            helpConfig = helpConfig
+        )
+
+        val update = Update(
+            updateId = 14L,
+            message = Message(
+                message_id = 40,
+                from = TelegramUser(id = 5L, isBot = false, language_code = "en"),
+                chat = Chat(id = 5L, type = "private"),
+                date = 0,
+                text = "/start"
+            )
+        )
+
+        processor.handle(update)
+
+        verify(telegramService, never()).sendWelcomeImage(any())
+        verify(telegramService, times(1)).safeSendMessage(any(), any(), anyOrNull())
     }
 
     @Test
