@@ -30,7 +30,8 @@ data class UserProfile(
     var lastMenuMessageId: Long?,
     var lastWelcomeImageMessageId: Long?,
     var lastWelcomeGreetingMessageId: Long?,
-    var lastStartCommandMessageId: Long?
+    var lastStartCommandMessageId: Long?,
+    val telegramLangCode: String?
 )
 
 class UserService {
@@ -38,9 +39,9 @@ class UserService {
         val existing = findUser(telegramId)
         val normalizedPreferred = normalizeLocale(preferredLanguage)
         if (existing != null) {
-            if (existing.locale == null && normalizedPreferred != null) {
-                updateLocale(telegramId, normalizedPreferred)
-                return existing.copy(locale = normalizedPreferred)
+            if (normalizedPreferred != null && normalizedPreferred != existing.telegramLangCode) {
+                updateTelegramLanguageCode(telegramId, normalizedPreferred)
+                return existing.copy(telegramLangCode = normalizedPreferred)
             }
             return existing
         }
@@ -48,7 +49,8 @@ class UserService {
         DatabaseFactory.dbQuery {
             UsersTable.insert {
                 it[UsersTable.telegramId] = telegramId
-                it[UsersTable.locale] = normalizedPreferred
+                it[UsersTable.locale] = null
+                it[UsersTable.telegramLangCode] = normalizedPreferred
                 it[UsersTable.createdAt] = now.atZone(ZoneOffset.UTC).toLocalDateTime()
                 it[UsersTable.conversationState] = ConversationState.AWAITING_LANGUAGE_SELECTION.name
                 it[UsersTable.mode] = null
@@ -61,14 +63,15 @@ class UserService {
         }
         return UserProfile(
             telegramId = telegramId,
-            locale = normalizedPreferred,
+            locale = null,
             conversationState = ConversationState.AWAITING_LANGUAGE_SELECTION,
             createdAt = now,
             mode = null,
             lastMenuMessageId = null,
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
-            lastStartCommandMessageId = null
+            lastStartCommandMessageId = null,
+            telegramLangCode = normalizedPreferred
         )
     }
 
@@ -76,6 +79,14 @@ class UserService {
         DatabaseFactory.dbQuery {
             UsersTable.update({ UsersTable.telegramId eq telegramId }) {
                 it[UsersTable.locale] = locale
+            }
+        }
+    }
+
+    private suspend fun updateTelegramLanguageCode(telegramId: Long, languageCode: String?) {
+        DatabaseFactory.dbQuery {
+            UsersTable.update({ UsersTable.telegramId eq telegramId }) {
+                it[UsersTable.telegramLangCode] = languageCode
             }
         }
     }
@@ -178,7 +189,8 @@ class UserService {
             lastMenuMessageId = row[UsersTable.lastMenuMessageId],
             lastWelcomeImageMessageId = row[UsersTable.lastWelcomeImageMessageId],
             lastWelcomeGreetingMessageId = row[UsersTable.lastWelcomeGreetingMessageId],
-            lastStartCommandMessageId = row[UsersTable.lastStartCommandMessageId]
+            lastStartCommandMessageId = row[UsersTable.lastStartCommandMessageId],
+            telegramLangCode = row[UsersTable.telegramLangCode]
         )
     }
 

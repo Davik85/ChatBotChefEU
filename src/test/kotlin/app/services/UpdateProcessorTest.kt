@@ -64,7 +64,8 @@ class UpdateProcessorTest {
             lastMenuMessageId = null,
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
-            lastStartCommandMessageId = null
+            lastStartCommandMessageId = null,
+            telegramLangCode = "en"
         )
 
         adminStateService.set(1L, AdminConversationState.AwaitingGrantPremium)
@@ -132,7 +133,8 @@ class UpdateProcessorTest {
             lastMenuMessageId = null,
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
-            lastStartCommandMessageId = null
+            lastStartCommandMessageId = null,
+            telegramLangCode = "en"
         )
 
         whenever(userService.ensureUser(2L, "en"))
@@ -198,7 +200,8 @@ class UpdateProcessorTest {
             lastMenuMessageId = null,
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
-            lastStartCommandMessageId = null
+            lastStartCommandMessageId = null,
+            telegramLangCode = null
         )
 
         whenever(userService.ensureUser(3L, null))
@@ -268,7 +271,8 @@ class UpdateProcessorTest {
             lastMenuMessageId = null,
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
-            lastStartCommandMessageId = null
+            lastStartCommandMessageId = null,
+            telegramLangCode = "en"
         )
 
         whenever(userService.ensureUser(5L, "en"))
@@ -333,7 +337,8 @@ class UpdateProcessorTest {
             lastMenuMessageId = null,
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
-            lastStartCommandMessageId = null
+            lastStartCommandMessageId = null,
+            telegramLangCode = "en"
         )
 
         adminStateService.set(4L, AdminConversationState.AwaitingUserStatus)
