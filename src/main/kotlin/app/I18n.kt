@@ -18,6 +18,8 @@ class I18n(
         return if (translations.containsKey(normalized)) normalized else DEFAULT_LANGUAGE
     }
 
+    fun baseLanguage(): String = BASE_LANGUAGE
+
     fun defaultLanguage(): String = DEFAULT_LANGUAGE
 
     fun translate(language: String?, key: String, variables: Map<String, String> = emptyMap()): String {

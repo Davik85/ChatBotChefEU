@@ -11,10 +11,12 @@ import app.Update
 import java.math.BigDecimal
 import java.time.Instant
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlinx.coroutines.runBlocking
 import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
+import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.atLeast
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
@@ -64,7 +66,9 @@ class UpdateProcessorTest {
             lastMenuMessageId = null,
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
-            lastStartCommandMessageId = null
+            lastStartCommandMessageId = null,
+            languageSelected = true,
+            telegramLangCode = "en"
         )
 
         adminStateService.set(1L, AdminConversationState.AwaitingGrantPremium)
@@ -119,9 +123,11 @@ class UpdateProcessorTest {
         val broadcastService = mock<BroadcastService>()
         val adminStateService = AdminConversationStateService()
 
-        whenever(telegramService.safeSendMessage(any(), any(), anyOrNull())).thenReturn(301L)
+        val promptCaptor = argumentCaptor<String>()
+        whenever(telegramService.safeSendMessage(any(), promptCaptor.capture(), anyOrNull())).thenReturn(301L)
         whenever(telegramService.mainMenuKeyboard(any())).thenReturn(InlineKeyboardMarkup(emptyList()))
-        whenever(telegramService.languageMenu(any())).thenReturn(InlineKeyboardMarkup(emptyList()))
+        val menuLanguageCaptor = argumentCaptor<String>()
+        whenever(telegramService.languageMenu(menuLanguageCaptor.capture())).thenReturn(InlineKeyboardMarkup(emptyList()))
 
         val user = UserProfile(
             telegramId = 2L,
@@ -132,7 +138,9 @@ class UpdateProcessorTest {
             lastMenuMessageId = null,
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
-            lastStartCommandMessageId = null
+            lastStartCommandMessageId = null,
+            languageSelected = false,
+            telegramLangCode = "en"
         )
 
         whenever(userService.ensureUser(2L, "en"))
@@ -170,6 +178,8 @@ class UpdateProcessorTest {
 
         verify(telegramService, never()).sendWelcomeImage(any())
         verify(telegramService, times(1)).safeSendMessage(any(), any(), anyOrNull())
+        assertEquals(i18n.translate("en", "menu.language.title"), promptCaptor.firstValue)
+        assertEquals("en", menuLanguageCaptor.firstValue)
     }
 
     @Test
@@ -198,7 +208,9 @@ class UpdateProcessorTest {
             lastMenuMessageId = null,
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
-            lastStartCommandMessageId = null
+            lastStartCommandMessageId = null,
+            languageSelected = false,
+            telegramLangCode = null
         )
 
         whenever(userService.ensureUser(3L, null))
@@ -238,7 +250,7 @@ class UpdateProcessorTest {
 
         processor.handle(callback)
 
-        verify(userService).updateLocale(3L, "en")
+        verify(userService).updateLocale(3L, "en", true)
         verify(telegramService, times(1)).sendWelcomeImage(3L)
         verify(telegramService, atLeast(3)).safeSendMessage(any(), any(), anyOrNull())
     }
@@ -268,7 +280,9 @@ class UpdateProcessorTest {
             lastMenuMessageId = null,
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
-            lastStartCommandMessageId = null
+            lastStartCommandMessageId = null,
+            languageSelected = true,
+            telegramLangCode = "en"
         )
 
         whenever(userService.ensureUser(5L, "en"))
@@ -306,6 +320,7 @@ class UpdateProcessorTest {
 
         verify(telegramService, never()).sendWelcomeImage(any())
         verify(telegramService, times(1)).safeSendMessage(any(), any(), anyOrNull())
+        verify(userService).updateLocale(5L, "en", false)
     }
 
     @Test
@@ -333,7 +348,9 @@ class UpdateProcessorTest {
             lastMenuMessageId = null,
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
-            lastStartCommandMessageId = null
+            lastStartCommandMessageId = null,
+            languageSelected = true,
+            telegramLangCode = "en"
         )
 
         adminStateService.set(4L, AdminConversationState.AwaitingUserStatus)
