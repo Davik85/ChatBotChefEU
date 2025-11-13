@@ -239,6 +239,15 @@ class UpdateProcessor(
             user.lastWelcomeGreetingMessageId = profileForMenu.lastWelcomeGreetingMessageId
             user.lastStartCommandMessageId = profileForMenu.lastStartCommandMessageId
         }
+        userService.updateConversationState(user.telegramId, null)
+        val profileForMenu = if (alreadyActive) user else user.copy(locale = locale)
+        showMainMenu(profileForMenu, chatId, responseLanguage, includeImage = true)
+        if (!alreadyActive) {
+            user.lastMenuMessageId = profileForMenu.lastMenuMessageId
+            user.lastWelcomeImageMessageId = profileForMenu.lastWelcomeImageMessageId
+            user.lastWelcomeGreetingMessageId = profileForMenu.lastWelcomeGreetingMessageId
+            user.lastStartCommandMessageId = profileForMenu.lastStartCommandMessageId
+        }
     }
 
     private suspend fun handleLanguageOther(
