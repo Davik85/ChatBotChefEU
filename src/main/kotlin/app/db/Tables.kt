@@ -8,6 +8,7 @@ object UsersTable : LongIdTable("users") {
     val telegramId = long("telegram_id").uniqueIndex()
     val locale = varchar("locale", length = 8).nullable()
     val telegramLangCode = varchar("telegram_lang_code", length = 8).nullable()
+    val languageSelected = bool("language_selected").default(false)
     val conversationState = varchar("conversation_state", length = 32).nullable()
     val mode = varchar("mode", length = 32).nullable()
     val activeMode = varchar("active_mode", length = 32).nullable()

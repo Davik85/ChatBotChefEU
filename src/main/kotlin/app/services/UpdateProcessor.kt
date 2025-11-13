@@ -173,9 +173,14 @@ class UpdateProcessor(
         user.mode = null
 
         val hasSupportedLocale = user.locale?.let { LanguageSupport.isSupported(it) } == true
-        val needsLanguageSelection = awaitingLanguageSelection || awaitingGreeting || !hasSupportedLocale
+        val languageConfirmed = hasSupportedLocale && user.languageSelected
+        val needsLanguageSelection = awaitingLanguageSelection || awaitingGreeting || !languageConfirmed
         if (needsLanguageSelection) {
             userService.updateConversationState(user.telegramId, ConversationState.AWAITING_LANGUAGE_SELECTION)
+            if (user.languageSelected) {
+                userService.updateLocale(user.telegramId, user.locale, markSelected = false)
+            }
+            user.languageSelected = false
             showLanguageMenu(user, chatId)
             return
         }
@@ -218,9 +223,21 @@ class UpdateProcessor(
         telegramService.safeSendMessage(chatId, confirmation)
         userService.updateMode(user.telegramId, null)
         user.mode = null
-        if (!alreadyActive) {
+        if (!alreadyActive || !user.languageSelected) {
             userService.updateLocale(user.telegramId, locale)
-            logger.info("Language for user {} set to {} via callback", user.telegramId, locale)
+            if (!alreadyActive) {
+                logger.info("Language for user {} set to {} via callback", user.telegramId, locale)
+            }
+        }
+        user.languageSelected = true
+        userService.updateConversationState(user.telegramId, null)
+        val profileForMenu = if (alreadyActive) user else user.copy(locale = locale, languageSelected = true)
+        showMainMenu(profileForMenu, chatId, responseLanguage, includeImage = true)
+        if (!alreadyActive) {
+            user.lastMenuMessageId = profileForMenu.lastMenuMessageId
+            user.lastWelcomeImageMessageId = profileForMenu.lastWelcomeImageMessageId
+            user.lastWelcomeGreetingMessageId = profileForMenu.lastWelcomeGreetingMessageId
+            user.lastStartCommandMessageId = profileForMenu.lastStartCommandMessageId
         }
         userService.updateConversationState(user.telegramId, null)
         val profileForMenu = if (alreadyActive) user else user.copy(locale = locale)
@@ -243,6 +260,10 @@ class UpdateProcessor(
         val title = i18n.translate(language, "lang.other.title")
         telegramService.answerCallback(callbackId, title)
         userService.updateConversationState(user.telegramId, ConversationState.AWAITING_GREETING)
+        if (user.languageSelected) {
+            userService.updateLocale(user.telegramId, user.locale, markSelected = false)
+        }
+        user.languageSelected = false
         val prompt = i18n.translate(language, "lang.other.prompt")
         if (messageId != null) {
             telegramService.removeInlineKeyboard(chatId, messageId)
@@ -280,6 +301,7 @@ class UpdateProcessor(
             telegramService.safeSendMessage(chatId, unsupported)
             user.mode = null
             userService.updateMode(user.telegramId, null)
+            user.languageSelected = true
             showMainMenu(user, chatId, fallback, includeImage = true)
             logger.warn("Unsupported locale {} detected for user {}", detected, user.telegramId)
             return
@@ -295,6 +317,7 @@ class UpdateProcessor(
         telegramService.safeSendMessage(chatId, confirmation)
         user.mode = null
         userService.updateMode(user.telegramId, null)
+        user.languageSelected = true
         showMainMenu(user, chatId, responseLanguage, includeImage = true)
         logger.info("Language for user {} set to {} via greeting", user.telegramId, detected)
     }
@@ -412,6 +435,10 @@ class UpdateProcessor(
 
     private suspend fun showLanguageMenu(user: UserProfile, chatId: Long) {
         userService.updateConversationState(user.telegramId, ConversationState.AWAITING_LANGUAGE_SELECTION)
+        if (user.languageSelected) {
+            userService.updateLocale(user.telegramId, user.locale, markSelected = false)
+            user.languageSelected = false
+        }
         val menuLanguage = user.locale?.takeIf { LanguageSupport.isSupported(it) }
             ?.let { i18n.resolveLanguage(it) }
             ?: i18n.baseLanguage()

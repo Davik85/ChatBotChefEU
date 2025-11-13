@@ -67,6 +67,7 @@ class UpdateProcessorTest {
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
             lastStartCommandMessageId = null,
+            languageSelected = true,
             telegramLangCode = "en"
         )
 
@@ -138,6 +139,7 @@ class UpdateProcessorTest {
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
             lastStartCommandMessageId = null,
+            languageSelected = false,
             telegramLangCode = "en"
         )
 
@@ -207,6 +209,7 @@ class UpdateProcessorTest {
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
             lastStartCommandMessageId = null,
+            languageSelected = false,
             telegramLangCode = null
         )
 
@@ -247,7 +250,7 @@ class UpdateProcessorTest {
 
         processor.handle(callback)
 
-        verify(userService).updateLocale(3L, "en")
+        verify(userService).updateLocale(3L, "en", true)
         verify(telegramService, times(1)).sendWelcomeImage(3L)
         verify(telegramService, atLeast(3)).safeSendMessage(any(), any(), anyOrNull())
     }
@@ -278,6 +281,7 @@ class UpdateProcessorTest {
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
             lastStartCommandMessageId = null,
+            languageSelected = true,
             telegramLangCode = "en"
         )
 
@@ -316,6 +320,7 @@ class UpdateProcessorTest {
 
         verify(telegramService, never()).sendWelcomeImage(any())
         verify(telegramService, times(1)).safeSendMessage(any(), any(), anyOrNull())
+        verify(userService).updateLocale(5L, "en", false)
     }
 
     @Test
@@ -344,6 +349,7 @@ class UpdateProcessorTest {
             lastWelcomeImageMessageId = null,
             lastWelcomeGreetingMessageId = null,
             lastStartCommandMessageId = null,
+            languageSelected = true,
             telegramLangCode = "en"
         )
 
