@@ -11,10 +11,12 @@ import app.Update
 import java.math.BigDecimal
 import java.time.Instant
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlinx.coroutines.runBlocking
 import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
+import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.atLeast
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
@@ -120,9 +122,11 @@ class UpdateProcessorTest {
         val broadcastService = mock<BroadcastService>()
         val adminStateService = AdminConversationStateService()
 
-        whenever(telegramService.safeSendMessage(any(), any(), anyOrNull())).thenReturn(301L)
+        val promptCaptor = argumentCaptor<String>()
+        whenever(telegramService.safeSendMessage(any(), promptCaptor.capture(), anyOrNull())).thenReturn(301L)
         whenever(telegramService.mainMenuKeyboard(any())).thenReturn(InlineKeyboardMarkup(emptyList()))
-        whenever(telegramService.languageMenu(any())).thenReturn(InlineKeyboardMarkup(emptyList()))
+        val menuLanguageCaptor = argumentCaptor<String>()
+        whenever(telegramService.languageMenu(menuLanguageCaptor.capture())).thenReturn(InlineKeyboardMarkup(emptyList()))
 
         val user = UserProfile(
             telegramId = 2L,
@@ -172,6 +176,8 @@ class UpdateProcessorTest {
 
         verify(telegramService, never()).sendWelcomeImage(any())
         verify(telegramService, times(1)).safeSendMessage(any(), any(), anyOrNull())
+        assertEquals(i18n.translate("en", "menu.language.title"), promptCaptor.firstValue)
+        assertEquals("en", menuLanguageCaptor.firstValue)
     }
 
     @Test
