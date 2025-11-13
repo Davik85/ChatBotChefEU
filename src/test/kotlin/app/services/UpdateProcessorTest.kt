@@ -183,6 +183,75 @@ class UpdateProcessorTest {
     }
 
     @Test
+    fun `language menu uses base locale when selection pending`() = runBlocking {
+        val telegramService = mock<TelegramService>()
+        val userService = mock<UserService>()
+        val premiumService = mock<PremiumService>()
+        val usageService = mock<UsageService>()
+        val messageHistoryService = mock<MessageHistoryService>()
+        val openAIClient = mock<app.openai.OpenAIClient>()
+        val adminService = mock<AdminService>()
+        val broadcastService = mock<BroadcastService>()
+        val adminStateService = AdminConversationStateService()
+
+        val promptCaptor = argumentCaptor<String>()
+        whenever(telegramService.safeSendMessage(any(), promptCaptor.capture(), anyOrNull())).thenReturn(302L)
+        val keyboardLanguage = argumentCaptor<String>()
+        whenever(telegramService.languageMenu(keyboardLanguage.capture())).thenReturn(InlineKeyboardMarkup(emptyList()))
+
+        val user = UserProfile(
+            telegramId = 3L,
+            locale = "ru",
+            conversationState = ConversationState.AWAITING_LANGUAGE_SELECTION,
+            createdAt = Instant.now(),
+            mode = null,
+            lastMenuMessageId = null,
+            lastWelcomeImageMessageId = null,
+            lastWelcomeGreetingMessageId = null,
+            lastStartCommandMessageId = null,
+            languageSelected = false,
+            telegramLangCode = "ru"
+        )
+
+        whenever(userService.ensureUser(3L, "ru"))
+            .thenReturn(user)
+        whenever(userService.findUser(3L)).thenReturn(user)
+
+        val processor = UpdateProcessor(
+            i18n = i18n,
+            userService = userService,
+            premiumService = premiumService,
+            usageService = usageService,
+            messageHistoryService = messageHistoryService,
+            telegramService = telegramService,
+            openAIClient = openAIClient,
+            billingConfig = billingConfig,
+            adminService = adminService,
+            adminConversationStateService = adminStateService,
+            broadcastService = broadcastService,
+            adminIds = emptySet(),
+            helpConfig = helpConfig
+        )
+
+        val update = Update(
+            updateId = 12L,
+            message = Message(
+                message_id = 22,
+                from = TelegramUser(id = 3L, isBot = false, language_code = "ru"),
+                chat = Chat(id = 3L, type = "private"),
+                date = 0,
+                text = "/start"
+            )
+        )
+
+        processor.handle(update)
+
+        verify(telegramService, never()).sendWelcomeImage(any())
+        assertEquals(i18n.translate("en", "menu.language.title"), promptCaptor.firstValue)
+        assertEquals("en", keyboardLanguage.firstValue)
+    }
+
+    @Test
     fun `language selection sends welcome sequence`() = runBlocking {
         val telegramService = mock<TelegramService>()
         val userService = mock<UserService>()

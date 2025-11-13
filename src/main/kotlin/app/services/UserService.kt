@@ -99,14 +99,6 @@ class UserService {
         }
     }
 
-    private suspend fun updateTelegramLanguageCode(telegramId: Long, languageCode: String?) {
-        DatabaseFactory.dbQuery {
-            UsersTable.update({ UsersTable.telegramId eq telegramId }) {
-                it[UsersTable.telegramLangCode] = languageCode
-            }
-        }
-    }
-
     suspend fun updateConversationState(telegramId: Long, state: ConversationState?) {
         DatabaseFactory.dbQuery {
             UsersTable.update({ UsersTable.telegramId eq telegramId }) {
