@@ -1,12 +1,15 @@
 package app
 
 import app.EnvMetadata
+import app.HelpConfig
 import app.BotTransport
 import app.TelegramConfig
 import app.TelegramParseMode
 import app.db.DatabaseFactory
 import app.openai.OpenAIClient
+import app.services.AdminConversationStateService
 import app.services.AdminService
+import app.services.BroadcastService
 import app.services.DeduplicationService
 import app.services.MessageHistoryService
 import app.services.PremiumService
@@ -72,6 +75,12 @@ class WebhookSmokeTest {
                 premiumDurationDays = 30,
                 reminderDays = listOf(2, 1)
             ),
+            help = HelpConfig(
+                websiteUrl = "",
+                privacyPolicyUrl = "",
+                publicOfferUrl = "",
+                supportEmail = ""
+            ),
             logRetentionDays = 7,
             environment = "PROD"
         )
@@ -101,6 +110,8 @@ class WebhookSmokeTest {
         val messageHistoryService = MessageHistoryService()
         val adminService = AdminService()
         val openAIClient = OpenAIClient(appConfig.openAI, mapper, OkHttpClient())
+        val adminConversationStateService = AdminConversationStateService()
+        val broadcastService = BroadcastService(telegramService)
         val updateProcessor = UpdateProcessor(
             i18n = i18n,
             userService = userService,
@@ -111,7 +122,10 @@ class WebhookSmokeTest {
             openAIClient = openAIClient,
             billingConfig = appConfig.billing,
             adminService = adminService,
-            adminIds = emptySet()
+            adminConversationStateService = adminConversationStateService,
+            broadcastService = broadcastService,
+            adminIds = emptySet(),
+            helpConfig = appConfig.help
         )
         val dedup = DeduplicationService()
         val reminder = ReminderService(appConfig.billing, premiumService, userService, telegramService, i18n)
