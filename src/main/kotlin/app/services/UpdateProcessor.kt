@@ -92,7 +92,21 @@ class UpdateProcessor(
         val user = userService.ensureUser(userId, message.from.language_code)
         val language = i18n.resolveLanguage(user.locale)
 
-        if (handleAdminConversationUpdate(user, chatId, message, language)) {
+        val rawText = message.text
+        val trimmedText = rawText?.trim().orEmpty()
+        val isCommand = trimmedText.startsWith("/")
+
+        if (isCommand && isAdminConversationState(user.conversationState) && !trimmedText.startsWith(COMMAND_ADMIN)) {
+            logger.info(
+                "Admin {} interrupted state {} with command {}",
+                user.telegramId,
+                user.conversationState,
+                trimmedText
+            )
+            clearAdminState(user.telegramId, "command $trimmedText")
+        }
+
+        if (!isCommand && handleAdminConversationUpdate(user, chatId, message, language)) {
             return
         }
 
@@ -101,12 +115,10 @@ class UpdateProcessor(
             return
         }
 
-        val text = message.text ?: run {
+        val text = rawText ?: run {
             sendText(chatId, language, "only_text")
             return
         }
-
-        val trimmedText = text.trim()
 
         if (user.conversationState == ConversationState.AWAITING_GREETING && !text.startsWith("/")) {
             handleGreetingInput(user, chatId, text, message.from.language_code)
@@ -116,8 +128,8 @@ class UpdateProcessor(
         when {
             trimmedText.startsWith(COMMAND_START) -> handleStart(user, chatId, language, message.message_id)
             trimmedText.startsWith(COMMAND_HELP) -> handleHelp(chatId, language)
-            trimmedText.startsWith(COMMAND_LANGUAGE) -> handleLanguageMenu(chatId, language)
-            trimmedText.equals("Change language", ignoreCase = true) -> handleLanguageMenu(chatId, language)
+            trimmedText.startsWith(COMMAND_LANGUAGE) -> handleLanguageMenu(user, chatId, language)
+            trimmedText.equals("Change language", ignoreCase = true) -> handleLanguageMenu(user, chatId, language)
             trimmedText.startsWith(COMMAND_PREMIUM_STATUS) -> handlePremiumStatus(chatId, userId, language)
             trimmedText.startsWith(COMMAND_ADMIN) -> {
                 handleAdminCommand(userId, chatId, language)
@@ -154,22 +166,29 @@ class UpdateProcessor(
     }
 
     private suspend fun handleStart(user: UserProfile, chatId: Long, language: String, startMessageId: Long?) {
+        val awaitingLanguageSelection = user.conversationState == ConversationState.AWAITING_LANGUAGE_SELECTION
         clearStartSequence(user, chatId, deleteStartCommand = false)
         userService.updateMode(user.telegramId, null)
         user.mode = null
+
+        val hasSupportedLocale = user.locale?.let { LanguageSupport.isSupported(it) } == true
+        val needsLanguageSelection = awaitingLanguageSelection || !hasSupportedLocale
+        if (needsLanguageSelection) {
+            userService.updateConversationState(user.telegramId, ConversationState.AWAITING_LANGUAGE_SELECTION)
+            showLanguageMenu(user, chatId, language)
+            return
+        }
+
         userService.updateConversationState(user.telegramId, null)
         showMainMenu(user, chatId, language, startMessageId = startMessageId, includeImage = true)
-        if (user.locale == null) {
-            showLanguageMenu(chatId, language)
-        }
     }
 
     private suspend fun handleHelp(chatId: Long, language: String) {
         telegramService.safeSendMessage(chatId, helpMessage(language))
     }
 
-    private suspend fun handleLanguageMenu(chatId: Long, language: String) {
-        showLanguageMenu(chatId, language)
+    private suspend fun handleLanguageMenu(user: UserProfile, chatId: Long, language: String) {
+        showLanguageMenu(user, chatId, language)
     }
 
     private suspend fun handleLanguageSelection(
@@ -385,7 +404,8 @@ class UpdateProcessor(
         }
     }
 
-    private suspend fun showLanguageMenu(chatId: Long, language: String) {
+    private suspend fun showLanguageMenu(user: UserProfile, chatId: Long, language: String) {
+        userService.updateConversationState(user.telegramId, ConversationState.AWAITING_LANGUAGE_SELECTION)
         val prompt = i18n.translate(language, "menu.language.title")
         telegramService.safeSendMessage(chatId, prompt, telegramService.languageMenu(language))
     }
@@ -427,7 +447,7 @@ class UpdateProcessor(
             sendText(chatId, language, "not_authorized")
             return
         }
-        clearAdminState(userId)
+        clearAdminState(userId, "opening admin menu")
         val title = i18n.translate(language, "admin.menu.title")
         val keyboard = telegramService.adminMenu(language)
         telegramService.safeSendMessage(chatId, title, keyboard)
@@ -645,11 +665,11 @@ class UpdateProcessor(
         val state = adminConversationStateService.get(userId)
         if (state !is AdminConversationState.BroadcastPreview) {
             sendText(chatId, language, "admin.broadcast.nothing_to_send")
-            clearAdminState(userId)
+            clearAdminState(userId, "broadcast send requested without payload")
             logger.warn("Admin {} attempted to send broadcast without payload", userId)
             return
         }
-        clearAdminState(userId)
+        clearAdminState(userId, "broadcast dispatched")
         val targetIds = userService.listAllUserIds()
         val result = broadcastService.dispatch(userId, targetIds, state.payload)
         val message = i18n.translate(
@@ -672,7 +692,7 @@ class UpdateProcessor(
     }
 
     private suspend fun handleAdminCancel(userId: Long, chatId: Long, language: String) {
-        clearAdminState(userId)
+        clearAdminState(userId, "admin cancelled action")
         sendText(chatId, language, "admin.common.cancelled")
         logger.info("Admin {} cancelled current action", userId)
     }
@@ -699,7 +719,7 @@ class UpdateProcessor(
             sendText(chatId, language, "admin.validation.not_found")
             return
         }
-        clearAdminState(user.telegramId)
+        clearAdminState(user.telegramId, "user status lookup completed")
         val now = Instant.now()
         val premiumUntil = status.premiumUntil?.takeIf { it.isAfter(now) }
         val premiumLine = if (premiumUntil != null) {
@@ -754,7 +774,7 @@ class UpdateProcessor(
             return
         }
         val expiry = premiumService.grantPremium(targetId, days)
-        clearAdminState(user.telegramId)
+        clearAdminState(user.telegramId, "premium granted")
         val expiryText = DATE_FORMATTER.format(expiry)
         val confirmation = i18n.translate(language, "admin.grant.ok", mapOf("date" to expiryText))
         telegramService.safeSendMessage(chatId, confirmation)
@@ -802,12 +822,12 @@ class UpdateProcessor(
             return false
         }
         if (!isAdmin(user.telegramId)) {
-            clearAdminState(user.telegramId)
+            clearAdminState(user.telegramId, "non-admin state reset")
             return false
         }
         val adminState = adminConversationStateService.get(user.telegramId)
         if (adminState == null) {
-            clearAdminState(user.telegramId)
+            clearAdminState(user.telegramId, "expired admin state")
             sendText(chatId, language, "admin.common.expired")
             logger.info("Admin {} conversation state expired", user.telegramId)
             return true
@@ -847,13 +867,50 @@ class UpdateProcessor(
     ) {
         adminConversationStateService.set(userId, adminState)
         userService.updateConversationState(userId, conversationState)
+        val stateLabel = adminStateLabel(adminState)
+        logger.info(
+            "Admin {} state set conversation={} admin={}",
+            userId,
+            conversationState,
+            stateLabel
+        )
     }
 
-    private suspend fun clearAdminState(userId: Long) {
+    private suspend fun clearAdminState(userId: Long, reason: String? = null) {
+        val existingAdminState = adminConversationStateService.get(userId)
         adminConversationStateService.clear(userId)
         val profile = userService.findUser(userId)
-        if (isAdminConversationState(profile?.conversationState)) {
+        val previousConversationState = profile?.conversationState
+        val hadAdminConversation = isAdminConversationState(previousConversationState)
+        if (hadAdminConversation) {
             userService.updateConversationState(userId, null)
+        }
+        val hadAdminState = existingAdminState != null || hadAdminConversation
+        val stateLabel = adminStateLabel(existingAdminState)
+        if (hadAdminState) {
+            val reasonLabel = reason?.let { " reason=$it" }.orEmpty()
+            logger.info(
+                "Admin {} state cleared{} (adminState={}, conversationState={})",
+                userId,
+                reasonLabel,
+                stateLabel,
+                previousConversationState
+            )
+        } else if (reason != null) {
+            logger.info(
+                "Admin {} state reset ignored (no active state) for {}",
+                userId,
+                reason
+            )
+        }
+    }
+
+    private fun adminStateLabel(state: AdminConversationState?): String {
+        return when (state) {
+            null -> "none"
+            is AdminConversationState.AwaitingBroadcastContent -> "AwaitingBroadcastContent(${state.type})"
+            is AdminConversationState.BroadcastPreview -> "BroadcastPreview(${state.payload.type()})"
+            else -> state::class.simpleName ?: state.javaClass.simpleName
         }
     }
 

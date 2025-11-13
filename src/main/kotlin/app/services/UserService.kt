@@ -13,6 +13,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 
 enum class ConversationState {
+    AWAITING_LANGUAGE_SELECTION,
     AWAITING_GREETING,
     ADMIN_AWAITING_BROADCAST_TEXT,
     ADMIN_CONFIRM_BROADCAST,
@@ -49,6 +50,7 @@ class UserService {
                 it[UsersTable.telegramId] = telegramId
                 it[UsersTable.locale] = normalizedPreferred
                 it[UsersTable.createdAt] = now.atZone(ZoneOffset.UTC).toLocalDateTime()
+                it[UsersTable.conversationState] = ConversationState.AWAITING_LANGUAGE_SELECTION.name
                 it[UsersTable.mode] = null
                 it[UsersTable.activeMode] = null
                 it[UsersTable.lastMenuMessageId] = null
@@ -57,7 +59,17 @@ class UserService {
                 it[UsersTable.lastStartCommandMessageId] = null
             }
         }
-        return UserProfile(telegramId, normalizedPreferred, null, now, null, null, null, null, null)
+        return UserProfile(
+            telegramId = telegramId,
+            locale = normalizedPreferred,
+            conversationState = ConversationState.AWAITING_LANGUAGE_SELECTION,
+            createdAt = now,
+            mode = null,
+            lastMenuMessageId = null,
+            lastWelcomeImageMessageId = null,
+            lastWelcomeGreetingMessageId = null,
+            lastStartCommandMessageId = null
+        )
     }
 
     suspend fun updateLocale(telegramId: Long, locale: String?) {
