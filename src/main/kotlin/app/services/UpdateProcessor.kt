@@ -26,6 +26,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeFormatterBuilder
 import java.time.temporal.ChronoField
 import org.slf4j.LoggerFactory
+import kotlin.coroutines.cancellation.CancellationException
 
 private const val ROLE_USER = "user"
 private const val ROLE_ASSISTANT = "assistant"
@@ -63,6 +64,17 @@ class UpdateProcessor(
     private val logger = LoggerFactory.getLogger(UpdateProcessor::class.java)
 
     override suspend fun handle(update: Update) {
+        try {
+            processUpdate(update)
+        } catch (ex: CancellationException) {
+            throw ex
+        } catch (ex: Exception) {
+            logger.error("Failed to handle update {}", update.updateId, ex)
+            handleProcessingFailure(update)
+        }
+    }
+
+    private suspend fun processUpdate(update: Update) {
         update.callbackQuery?.let { callback ->
             handleCallback(
                 callback.id,
@@ -922,6 +934,19 @@ class UpdateProcessor(
         telegramService.safeSendMessage(chatId, responseText)
         val assistantMessage = if (body.isNotEmpty()) body else responseText
         messageHistoryService.append(userId, ROLE_ASSISTANT, assistantMessage)
+    }
+
+    private suspend fun handleProcessingFailure(update: Update) {
+        val callbackQuery = update.callbackQuery
+        if (callbackQuery != null) {
+            runCatching { telegramService.answerCallback(callbackQuery.id, null) }
+                .onFailure { logger.warn("Failed to acknowledge errored callback {}: {}", callbackQuery.id, it.message) }
+        }
+        val chatId = update.message?.chat?.id ?: callbackQuery?.message?.chat?.id ?: return
+        val languageCode = update.message?.from?.language_code ?: callbackQuery?.from?.language_code
+        val language = i18n.resolveLanguage(languageCode)
+        val fallback = i18n.translate(language, "ai_error")
+        telegramService.safeSendMessage(chatId, fallback)
     }
 
     private suspend fun sendText(
