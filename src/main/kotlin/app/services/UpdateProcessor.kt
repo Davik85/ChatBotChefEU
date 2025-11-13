@@ -121,7 +121,7 @@ class UpdateProcessor(
         }
 
         if (user.conversationState == ConversationState.AWAITING_GREETING && !text.startsWith("/")) {
-            handleGreetingInput(user, chatId, text, message.from.language_code)
+            handleGreetingInput(user, chatId, text)
             return
         }
 
@@ -167,12 +167,13 @@ class UpdateProcessor(
 
     private suspend fun handleStart(user: UserProfile, chatId: Long, language: String, startMessageId: Long?) {
         val awaitingLanguageSelection = user.conversationState == ConversationState.AWAITING_LANGUAGE_SELECTION
+        val awaitingGreeting = user.conversationState == ConversationState.AWAITING_GREETING
         clearStartSequence(user, chatId, deleteStartCommand = false)
         userService.updateMode(user.telegramId, null)
         user.mode = null
 
         val hasSupportedLocale = user.locale?.let { LanguageSupport.isSupported(it) } == true
-        val needsLanguageSelection = awaitingLanguageSelection || !hasSupportedLocale
+        val needsLanguageSelection = awaitingLanguageSelection || awaitingGreeting || !hasSupportedLocale
         if (needsLanguageSelection) {
             userService.updateConversationState(user.telegramId, ConversationState.AWAITING_LANGUAGE_SELECTION)
             showLanguageMenu(user, chatId, language)
@@ -217,11 +218,18 @@ class UpdateProcessor(
         telegramService.safeSendMessage(chatId, confirmation)
         userService.updateMode(user.telegramId, null)
         user.mode = null
-        showMainMenu(user, chatId, responseLanguage, includeImage = true)
-        userService.updateConversationState(user.telegramId, null)
         if (!alreadyActive) {
             userService.updateLocale(user.telegramId, locale)
             logger.info("Language for user {} set to {} via callback", user.telegramId, locale)
+        }
+        userService.updateConversationState(user.telegramId, null)
+        val profileForMenu = if (alreadyActive) user else user.copy(locale = locale)
+        showMainMenu(profileForMenu, chatId, responseLanguage, includeImage = true)
+        if (!alreadyActive) {
+            user.lastMenuMessageId = profileForMenu.lastMenuMessageId
+            user.lastWelcomeImageMessageId = profileForMenu.lastWelcomeImageMessageId
+            user.lastWelcomeGreetingMessageId = profileForMenu.lastWelcomeGreetingMessageId
+            user.lastStartCommandMessageId = profileForMenu.lastStartCommandMessageId
         }
     }
 
@@ -245,14 +253,12 @@ class UpdateProcessor(
     private suspend fun handleGreetingInput(
         user: UserProfile,
         chatId: Long,
-        text: String,
-        fallbackLanguageCode: String?
+        text: String
     ) {
         val language = i18n.resolveLanguage(user.locale)
         val supportedLanguages = LanguageSupport.supportedLanguageList()
         val detected = detectLanguageByGreeting(text)
             ?: detectLanguageByName(text)
-            ?: normalizeLocale(fallbackLanguageCode)
         if (detected == null) {
             val response = i18n.translate(
                 language,
