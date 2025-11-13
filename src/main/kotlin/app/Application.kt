@@ -26,6 +26,7 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.*
 import org.slf4j.LoggerFactory
+import java.util.concurrent.TimeUnit
 
 private val logger = LoggerFactory.getLogger("app.Application")
 
@@ -43,7 +44,11 @@ fun main() {
 
     DatabaseFactory.init(config.database)
     val mapper = configuredMapper()
-    val client = okhttp3.OkHttpClient.Builder().build()
+    val client = okhttp3.OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(65, TimeUnit.SECONDS)
+        .build()
     val openAIClient = OpenAIClient(config.openAI, mapper, client)
     val i18n = I18n.load(mapper)
     val telegramClient = TelegramClient(config.telegram, mapper, client)

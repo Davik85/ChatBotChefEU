@@ -15,6 +15,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.slf4j.LoggerFactory
+import java.io.IOException
+import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 
 private val MEDIA_TYPE_JSON = "application/json; charset=utf-8".toMediaType()
@@ -52,7 +54,7 @@ class TelegramClient(
         parseMode: ParseMode? = null,
         replyMarkup: Any? = null
     ): Message? {
-        when (photo) {
+        return when (photo) {
             is InputFile.Url -> {
                 val payload = mutableMapOf<String, Any>(
                     "chat_id" to chatId,
@@ -68,7 +70,7 @@ class TelegramClient(
                     payload["reply_markup"] = replyMarkup
                 }
                 logOutbound("sendPhoto", payload)
-                return executePostForResult("sendPhoto", payload, Message::class.java)
+                executePostForResult("sendPhoto", payload, Message::class.java)
             }
             is InputFile.Existing -> {
                 val payload = mutableMapOf<String, Any>(
@@ -87,7 +89,7 @@ class TelegramClient(
                 val logPayload = payload.toMutableMap()
                 logPayload["photo"] = "existing"
                 logOutbound("sendPhoto", logPayload)
-                return executePostForResult("sendPhoto", payload, Message::class.java)
+                executePostForResult("sendPhoto", payload, Message::class.java)
             }
             is InputFile.Bytes -> {
                 val bodyBuilder = MultipartBody.Builder().setType(MultipartBody.FORM)
@@ -117,10 +119,9 @@ class TelegramClient(
                         "reply_markup" to if (replyMarkup != null) "present" else "null"
                     )
                 )
-                return executeMultipartForResult("sendPhoto", bodyBuilder.build(), Message::class.java)
+                executeMultipartForResult("sendPhoto", bodyBuilder.build(), Message::class.java)
             }
         }
-        return null
     }
 
     suspend fun sendVideo(
@@ -130,7 +131,7 @@ class TelegramClient(
         parseMode: ParseMode? = null,
         replyMarkup: Any? = null
     ): Message? {
-        when (video) {
+        return when (video) {
             is InputFile.Url -> {
                 val payload = mutableMapOf<String, Any>(
                     "chat_id" to chatId,
@@ -146,7 +147,7 @@ class TelegramClient(
                     payload["reply_markup"] = replyMarkup
                 }
                 logOutbound("sendVideo", payload)
-                return executePostForResult("sendVideo", payload, Message::class.java)
+                executePostForResult("sendVideo", payload, Message::class.java)
             }
             is InputFile.Existing -> {
                 val payload = mutableMapOf<String, Any>(
@@ -165,7 +166,7 @@ class TelegramClient(
                 val logPayload = payload.toMutableMap()
                 logPayload["video"] = "existing"
                 logOutbound("sendVideo", logPayload)
-                return executePostForResult("sendVideo", payload, Message::class.java)
+                executePostForResult("sendVideo", payload, Message::class.java)
             }
             is InputFile.Bytes -> {
                 val bodyBuilder = MultipartBody.Builder().setType(MultipartBody.FORM)
@@ -195,10 +196,9 @@ class TelegramClient(
                         "reply_markup" to if (replyMarkup != null) "present" else "null"
                     )
                 )
-                return executeMultipartForResult("sendVideo", bodyBuilder.build(), Message::class.java)
+                executeMultipartForResult("sendVideo", bodyBuilder.build(), Message::class.java)
             }
         }
-        return null
     }
 
     suspend fun editMessageText(
@@ -277,34 +277,35 @@ class TelegramClient(
             .callTimeout(timeoutSec + 20L, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .build()
-        pollClient.newCall(request).execute().use { response ->
-            val body = response.body?.string().orEmpty()
-            val safeUrl = maskUrl(url.toString())
-            if (!response.isSuccessful) {
-                logTelegramApiError(response.code, safeUrl, body)
-                return emptyList()
+        return executeSafely("getUpdates", url.toString(), emptyList()) { safeUrl ->
+            pollClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    logTelegramApiError(response.code, safeUrl, body)
+                    return@executeSafely emptyList()
+                }
+                if (body.isBlank()) {
+                    return@executeSafely emptyList()
+                }
+                val node = runCatching { mapper.readTree(body) }.getOrNull() ?: return@executeSafely emptyList()
+                val ok = node.get("ok")?.asBoolean() ?: false
+                if (!ok) {
+                    val errorCode = node.get("error_code")?.asInt()
+                    val description = node.get("description")?.asText()
+                    logger.warn(
+                        "Telegram API returned ok=false: method=getUpdates status={} url={} error_code={} description={} body={}",
+                        response.code,
+                        safeUrl,
+                        errorCode,
+                        description,
+                        body
+                    )
+                    return@executeSafely emptyList()
+                }
+                val resultNode = node.get("result") ?: return@executeSafely emptyList()
+                if (!resultNode.isArray) return@executeSafely emptyList()
+                resultNode.mapNotNull { mapper.treeToValue(it, Update::class.java) }
             }
-            if (body.isBlank()) {
-                return emptyList()
-            }
-            val node = runCatching { mapper.readTree(body) }.getOrNull() ?: return emptyList()
-            val ok = node.get("ok")?.asBoolean() ?: false
-            if (!ok) {
-                val errorCode = node.get("error_code")?.asInt()
-                val description = node.get("description")?.asText()
-                logger.warn(
-                    "Telegram API returned ok=false: method=getUpdates status={} url={} error_code={} description={} body={}",
-                    response.code,
-                    safeUrl,
-                    errorCode,
-                    description,
-                    body
-                )
-                return emptyList()
-            }
-            val resultNode = node.get("result") ?: return emptyList()
-            if (!resultNode.isArray) return emptyList()
-            return resultNode.mapNotNull { mapper.treeToValue(it, Update::class.java) }
         }
     }
 
@@ -315,27 +316,28 @@ class TelegramClient(
             .url(url)
             .post(body)
             .build()
-        client.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string().orEmpty()
-            val safeUrl = maskUrl(url)
-            if (!response.isSuccessful) {
-                logTelegramApiError(response.code, safeUrl, responseBody)
-                return
-            }
-            if (responseBody.isBlank()) return
-            val parsed = runCatching { mapper.readTree(responseBody) }.getOrNull()
-            if (parsed != null && parsed.get("ok")?.asBoolean() == false) {
-                val errorCode = parsed.get("error_code")?.asInt()
-                val description = parsed.get("description")?.asText()
-                logger.warn(
-                    "Telegram API returned ok=false: method={} status={} url={} error_code={} description={} body={}",
-                    method,
-                    response.code,
-                    safeUrl,
-                    errorCode,
-                    description,
-                    responseBody
-                )
+        executeSafely(method, url, Unit) { safeUrl ->
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    logTelegramApiError(response.code, safeUrl, responseBody)
+                    return@executeSafely
+                }
+                if (responseBody.isBlank()) return@executeSafely
+                val parsed = runCatching { mapper.readTree(responseBody) }.getOrNull()
+                if (parsed != null && parsed.get("ok")?.asBoolean() == false) {
+                    val errorCode = parsed.get("error_code")?.asInt()
+                    val description = parsed.get("description")?.asText()
+                    logger.warn(
+                        "Telegram API returned ok=false: method={} status={} url={} error_code={} description={} body={}",
+                        method,
+                        response.code,
+                        safeUrl,
+                        errorCode,
+                        description,
+                        responseBody
+                    )
+                }
             }
         }
     }
@@ -379,27 +381,28 @@ class TelegramClient(
             .url(url)
             .post(body)
             .build()
-        client.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string().orEmpty()
-            val safeUrl = maskUrl(url)
-            if (!response.isSuccessful) {
-                logTelegramApiError(response.code, safeUrl, responseBody)
-                return null
-            }
-            if (responseBody.isBlank()) return null
-            val type = mapper.typeFactory.constructParametricType(TelegramResponse::class.java, clazz)
-            return try {
-                @Suppress("UNCHECKED_CAST")
-                mapper.readValue(responseBody, type) as TelegramResponse<T>
-            } catch (ex: Exception) {
-                logger.warn(
-                    "Telegram API response parse error: method={} url={} body={}",
-                    method,
-                    safeUrl,
-                    responseBody,
-                    ex
-                )
-                null
+        return executeSafely(method, url, null) { safeUrl ->
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    logTelegramApiError(response.code, safeUrl, responseBody)
+                    return@executeSafely null
+                }
+                if (responseBody.isBlank()) return@executeSafely null
+                val type = mapper.typeFactory.constructParametricType(TelegramResponse::class.java, clazz)
+                try {
+                    @Suppress("UNCHECKED_CAST")
+                    mapper.readValue(responseBody, type) as TelegramResponse<T>
+                } catch (ex: Exception) {
+                    logger.warn(
+                        "Telegram API response parse error: method={} url={} body={}",
+                        method,
+                        safeUrl,
+                        responseBody,
+                        ex
+                    )
+                    null
+                }
             }
         }
     }
@@ -410,28 +413,55 @@ class TelegramClient(
             .url(url)
             .post(body)
             .build()
-        client.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string().orEmpty()
-            val safeUrl = maskUrl(url)
-            if (!response.isSuccessful) {
-                logTelegramApiError(response.code, safeUrl, responseBody)
-                return null
+        return executeSafely(method, url, null) { safeUrl ->
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    logTelegramApiError(response.code, safeUrl, responseBody)
+                    return@executeSafely null
+                }
+                if (responseBody.isBlank()) return@executeSafely null
+                val type = mapper.typeFactory.constructParametricType(TelegramResponse::class.java, clazz)
+                try {
+                    @Suppress("UNCHECKED_CAST")
+                    mapper.readValue(responseBody, type) as TelegramResponse<T>
+                } catch (ex: Exception) {
+                    logger.warn(
+                        "Telegram API response parse error: method={} url={} body={}",
+                        method,
+                        safeUrl,
+                        responseBody,
+                        ex
+                    )
+                    null
+                }
             }
-            if (responseBody.isBlank()) return null
-            val type = mapper.typeFactory.constructParametricType(TelegramResponse::class.java, clazz)
-            return try {
-                @Suppress("UNCHECKED_CAST")
-                mapper.readValue(responseBody, type) as TelegramResponse<T>
-            } catch (ex: Exception) {
-                logger.warn(
-                    "Telegram API response parse error: method={} url={} body={}",
-                    method,
-                    safeUrl,
-                    responseBody,
-                    ex
-                )
-                null
-            }
+        }
+    }
+
+    private fun <T> executeSafely(method: String, url: String, fallback: T, block: (safeUrl: String) -> T): T {
+        val safeUrl = maskUrl(url)
+        return try {
+            block(safeUrl)
+        } catch (timeout: SocketTimeoutException) {
+            logger.warn(
+                "Telegram request timeout: method={} url={} error={}",
+                method,
+                safeUrl,
+                timeout.message
+            )
+            fallback
+        } catch (io: IOException) {
+            logger.warn(
+                "Telegram request I/O error: method={} url={} error={}",
+                method,
+                safeUrl,
+                io.message
+            )
+            fallback
+        } catch (ex: Exception) {
+            logger.error("Telegram request failed: method={} url={}", method, safeUrl, ex)
+            fallback
         }
     }
 
