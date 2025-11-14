@@ -16,6 +16,8 @@ object UsersTable : LongIdTable("users") {
     val lastWelcomeImageMessageId = long("last_welcome_image_message_id").nullable()
     val lastWelcomeGreetingMessageId = long("last_welcome_greeting_message_id").nullable()
     val lastStartCommandMessageId = long("last_start_command_message_id").nullable()
+    val isBlocked = bool("is_blocked").default(false)
+    val blockedAt = datetime("blocked_at").nullable()
     val createdAt = datetime("created_at")
 }
 

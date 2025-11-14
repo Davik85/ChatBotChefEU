@@ -76,5 +76,6 @@
   "admin.broadcast.prompt.text": "Send the broadcast text in one message.",
   "admin.broadcast.prompt.photo": "Send one image with an optional caption.",
   "admin.broadcast.prompt.video": "Send one video with an optional caption.",
-  "admin.broadcast.preview.title": "Broadcast preview"
+  "admin.broadcast.preview.title": "Broadcast preview",
+  "admin.stats.blocked30": " (30d: {value})"
 }

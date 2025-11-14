@@ -5,9 +5,9 @@ import app.db.DatabaseFactory
 import app.db.UsersTable
 import app.util.ClockProvider
 import org.jetbrains.exposed.sql.ResultRow
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.select
-import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
 import java.time.Instant
 import java.time.ZoneOffset
@@ -32,7 +32,9 @@ data class UserProfile(
     var lastWelcomeGreetingMessageId: Long?,
     var lastStartCommandMessageId: Long?,
     var languageSelected: Boolean,
-    val telegramLangCode: String?
+    val telegramLangCode: String?,
+    var isBlocked: Boolean,
+    var blockedAt: Instant?
 )
 
 class UserService {
@@ -61,6 +63,8 @@ class UserService {
                 it[UsersTable.lastWelcomeImageMessageId] = null
                 it[UsersTable.lastWelcomeGreetingMessageId] = null
                 it[UsersTable.lastStartCommandMessageId] = null
+                it[UsersTable.isBlocked] = false
+                it[UsersTable.blockedAt] = null
             }
         }
         return UserProfile(
@@ -74,7 +78,9 @@ class UserService {
             lastWelcomeGreetingMessageId = null,
             lastStartCommandMessageId = null,
             languageSelected = false,
-            telegramLangCode = normalizedPreferred
+            telegramLangCode = normalizedPreferred,
+            isBlocked = false,
+            blockedAt = null
         )
     }
 
@@ -177,8 +183,27 @@ class UserService {
     suspend fun listAllUserIds(): List<Long> {
         return DatabaseFactory.dbQuery {
             UsersTable.slice(listOf(UsersTable.telegramId))
-                .selectAll()
+                .select { UsersTable.isBlocked eq false }
                 .map { it[UsersTable.telegramId] }
+        }
+    }
+
+    suspend fun markBlocked(telegramId: Long) {
+        val now = Instant.now(ClockProvider.clock).atZone(ZoneOffset.UTC).toLocalDateTime()
+        DatabaseFactory.dbQuery {
+            UsersTable.update({ UsersTable.telegramId eq telegramId }) {
+                it[UsersTable.isBlocked] = true
+                it[UsersTable.blockedAt] = now
+            }
+        }
+    }
+
+    suspend fun markUnblocked(telegramId: Long) {
+        DatabaseFactory.dbQuery {
+            UsersTable.update({ UsersTable.telegramId eq telegramId }) {
+                it[UsersTable.isBlocked] = false
+                it[UsersTable.blockedAt] = null
+            }
         }
     }
 
@@ -199,7 +224,9 @@ class UserService {
             lastWelcomeGreetingMessageId = row[UsersTable.lastWelcomeGreetingMessageId],
             lastStartCommandMessageId = row[UsersTable.lastStartCommandMessageId],
             languageSelected = row[UsersTable.languageSelected],
-            telegramLangCode = row[UsersTable.telegramLangCode]
+            telegramLangCode = row[UsersTable.telegramLangCode],
+            isBlocked = row[UsersTable.isBlocked],
+            blockedAt = row[UsersTable.blockedAt]?.atZone(ZoneOffset.UTC)?.toInstant()
         )
     }
 

@@ -2,6 +2,8 @@ package app.services
 
 import app.BillingConfig
 import app.Chat
+import app.ChatMember
+import app.ChatMemberUpdated
 import app.HelpConfig
 import app.I18n
 import app.InlineKeyboardMarkup
@@ -68,7 +70,9 @@ class UpdateProcessorTest {
             lastWelcomeGreetingMessageId = null,
             lastStartCommandMessageId = null,
             languageSelected = true,
-            telegramLangCode = "en"
+            telegramLangCode = "en",
+            isBlocked = false,
+            blockedAt = null
         )
 
         adminStateService.set(1L, AdminConversationState.AwaitingGrantPremium)
@@ -140,7 +144,9 @@ class UpdateProcessorTest {
             lastWelcomeGreetingMessageId = null,
             lastStartCommandMessageId = null,
             languageSelected = false,
-            telegramLangCode = "en"
+            telegramLangCode = "en",
+            isBlocked = false,
+            blockedAt = null
         )
 
         whenever(userService.ensureUser(2L, "en"))
@@ -210,7 +216,9 @@ class UpdateProcessorTest {
             lastWelcomeGreetingMessageId = null,
             lastStartCommandMessageId = null,
             languageSelected = false,
-            telegramLangCode = "ru"
+            telegramLangCode = "ru",
+            isBlocked = false,
+            blockedAt = null
         )
 
         whenever(userService.ensureUser(3L, "ru"))
@@ -279,7 +287,9 @@ class UpdateProcessorTest {
             lastWelcomeGreetingMessageId = null,
             lastStartCommandMessageId = null,
             languageSelected = false,
-            telegramLangCode = null
+            telegramLangCode = null,
+            isBlocked = false,
+            blockedAt = null
         )
 
         whenever(userService.ensureUser(3L, null))
@@ -351,7 +361,9 @@ class UpdateProcessorTest {
             lastWelcomeGreetingMessageId = null,
             lastStartCommandMessageId = null,
             languageSelected = true,
-            telegramLangCode = "en"
+            telegramLangCode = "en",
+            isBlocked = false,
+            blockedAt = null
         )
 
         whenever(userService.ensureUser(5L, "en"))
@@ -419,7 +431,9 @@ class UpdateProcessorTest {
             lastWelcomeGreetingMessageId = null,
             lastStartCommandMessageId = null,
             languageSelected = true,
-            telegramLangCode = "en"
+            telegramLangCode = "en",
+            isBlocked = false,
+            blockedAt = null
         )
 
         adminStateService.set(4L, AdminConversationState.AwaitingUserStatus)
@@ -459,6 +473,130 @@ class UpdateProcessorTest {
         assertNull(adminStateService.get(4L))
         verify(usageService, never()).incrementUsage(any())
         verify(telegramService, times(1)).safeSendMessage(any(), any(), anyOrNull())
+    }
+
+    @Test
+    fun `my_chat_member kicked marks user as blocked`() = runBlocking {
+        val telegramService = mock<TelegramService>()
+        val userService = mock<UserService>()
+        val premiumService = mock<PremiumService>()
+        val usageService = mock<UsageService>()
+        val messageHistoryService = mock<MessageHistoryService>()
+        val openAIClient = mock<app.openai.OpenAIClient>()
+        val adminService = mock<AdminService>()
+        val broadcastService = mock<BroadcastService>()
+        val adminStateService = AdminConversationStateService()
+
+        val user = UserProfile(
+            telegramId = 10L,
+            locale = null,
+            conversationState = null,
+            createdAt = Instant.now(),
+            mode = null,
+            lastMenuMessageId = null,
+            lastWelcomeImageMessageId = null,
+            lastWelcomeGreetingMessageId = null,
+            lastStartCommandMessageId = null,
+            languageSelected = false,
+            telegramLangCode = null,
+            isBlocked = false,
+            blockedAt = null
+        )
+
+        whenever(userService.ensureUser(10L, null)).thenReturn(user)
+
+        val processor = UpdateProcessor(
+            i18n = i18n,
+            userService = userService,
+            premiumService = premiumService,
+            usageService = usageService,
+            messageHistoryService = messageHistoryService,
+            telegramService = telegramService,
+            openAIClient = openAIClient,
+            billingConfig = billingConfig,
+            adminService = adminService,
+            adminConversationStateService = adminStateService,
+            broadcastService = broadcastService,
+            adminIds = emptySet(),
+            helpConfig = helpConfig
+        )
+
+        val update = Update(
+            updateId = 200L,
+            myChatMember = ChatMemberUpdated(
+                chat = Chat(id = 10L, type = "private"),
+                from = TelegramUser(id = 10L, isBot = false),
+                oldChatMember = null,
+                newChatMember = ChatMember(status = "kicked")
+            )
+        )
+
+        processor.handle(update)
+
+        verify(userService).markBlocked(10L)
+        verify(userService, never()).markUnblocked(any())
+    }
+
+    @Test
+    fun `my_chat_member member marks user as unblocked`() = runBlocking {
+        val telegramService = mock<TelegramService>()
+        val userService = mock<UserService>()
+        val premiumService = mock<PremiumService>()
+        val usageService = mock<UsageService>()
+        val messageHistoryService = mock<MessageHistoryService>()
+        val openAIClient = mock<app.openai.OpenAIClient>()
+        val adminService = mock<AdminService>()
+        val broadcastService = mock<BroadcastService>()
+        val adminStateService = AdminConversationStateService()
+
+        val user = UserProfile(
+            telegramId = 11L,
+            locale = null,
+            conversationState = null,
+            createdAt = Instant.now(),
+            mode = null,
+            lastMenuMessageId = null,
+            lastWelcomeImageMessageId = null,
+            lastWelcomeGreetingMessageId = null,
+            lastStartCommandMessageId = null,
+            languageSelected = false,
+            telegramLangCode = null,
+            isBlocked = true,
+            blockedAt = Instant.now()
+        )
+
+        whenever(userService.ensureUser(11L, null)).thenReturn(user)
+
+        val processor = UpdateProcessor(
+            i18n = i18n,
+            userService = userService,
+            premiumService = premiumService,
+            usageService = usageService,
+            messageHistoryService = messageHistoryService,
+            telegramService = telegramService,
+            openAIClient = openAIClient,
+            billingConfig = billingConfig,
+            adminService = adminService,
+            adminConversationStateService = adminStateService,
+            broadcastService = broadcastService,
+            adminIds = emptySet(),
+            helpConfig = helpConfig
+        )
+
+        val update = Update(
+            updateId = 201L,
+            myChatMember = ChatMemberUpdated(
+                chat = Chat(id = 11L, type = "private"),
+                from = TelegramUser(id = 11L, isBot = false),
+                oldChatMember = null,
+                newChatMember = ChatMember(status = "member")
+            )
+        )
+
+        processor.handle(update)
+
+        verify(userService).markUnblocked(11L)
+        verify(userService, never()).markBlocked(any())
     }
 }
 

@@ -7,7 +7,22 @@ import com.fasterxml.jackson.annotation.JsonProperty
 data class Update(
     @JsonProperty("update_id") val updateId: Long,
     val message: Message? = null,
-    @JsonProperty("callback_query") val callbackQuery: CallbackQuery? = null
+    @JsonProperty("callback_query") val callbackQuery: CallbackQuery? = null,
+    @JsonProperty("my_chat_member") val myChatMember: ChatMemberUpdated? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class ChatMemberUpdated(
+    val chat: Chat,
+    val from: TelegramUser?,
+    @JsonProperty("old_chat_member") val oldChatMember: ChatMember?,
+    @JsonProperty("new_chat_member") val newChatMember: ChatMember
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class ChatMember(
+    val status: String,
+    val user: TelegramUser? = null
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

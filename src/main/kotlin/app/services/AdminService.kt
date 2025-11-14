@@ -8,8 +8,11 @@ import app.util.ClockProvider
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
+import org.jetbrains.exposed.sql.JoinType
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greaterEq
+import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.count
 import org.jetbrains.exposed.sql.select
@@ -20,7 +23,8 @@ data class AdminOverview(
     val active7Days: Long,
     val active30Days: Long,
     val activePremiumUsers: Long,
-    val blockedUsers: Long?
+    val blockedUsers: Long,
+    val blockedUsersLast30Days: Long
 )
 
 data class LanguageStat(
@@ -63,12 +67,33 @@ class AdminService {
             val active7 = countActiveUsersSince(sevenDaysAgo)
             val active30 = countActiveUsersSince(thirtyDaysAgo)
 
+            val blockedExpr = UsersTable.id.count()
+            val blockedTotal = UsersTable
+                .slice(blockedExpr)
+                .select { UsersTable.isBlocked eq true }
+                .singleOrNull()
+                ?.get(blockedExpr)
+                ?.toLong()
+                ?: 0L
+
+            val blockedLast30 = UsersTable
+                .slice(blockedExpr)
+                .select {
+                    (UsersTable.isBlocked eq true) and
+                        (UsersTable.blockedAt greaterEq thirtyDaysAgo.atZone(ZoneOffset.UTC).toLocalDateTime())
+                }
+                .singleOrNull()
+                ?.get(blockedExpr)
+                ?.toLong()
+                ?: 0L
+
             AdminOverview(
                 totalUsers = totalUsers,
                 active7Days = active7,
                 active30Days = active30,
                 activePremiumUsers = activePremium,
-                blockedUsers = null
+                blockedUsers = blockedTotal,
+                blockedUsersLast30Days = blockedLast30
             )
         }
     }
@@ -121,8 +146,11 @@ class AdminService {
     private fun countActiveUsersSince(since: Instant): Long {
         val sinceDateTime = since.atZone(ZoneOffset.UTC).toLocalDateTime()
         return MessagesHistoryTable
+            .join(UsersTable, JoinType.INNER, MessagesHistoryTable.telegramId, UsersTable.telegramId)
             .slice(MessagesHistoryTable.telegramId)
-            .select { MessagesHistoryTable.createdAt greaterEq sinceDateTime }
+            .select {
+                (MessagesHistoryTable.createdAt greaterEq sinceDateTime) and (UsersTable.isBlocked eq false)
+            }
             .withDistinct()
             .count()
             .toLong()
