@@ -1,6 +1,7 @@
 package app.services
 
 import app.BillingConfig
+import app.ChatMemberUpdated
 import app.HelpConfig
 import app.I18n
 import app.InputFile
@@ -14,6 +15,7 @@ import app.prompts.Prompts
 import app.services.ConversationMode
 import app.util.AdminCallbackAction
 import app.util.LanguageCallbackAction
+import app.util.ClockProvider
 import app.util.detectLanguageByGreeting
 import app.util.detectLanguageByName
 import app.util.parseAdminCallbackData
@@ -85,11 +87,22 @@ class UpdateProcessor(
             )
             return
         }
+        update.myChatMember?.let { chatMember ->
+            if (chatMember.chat.type == "private") {
+                handleMyChatMember(chatMember)
+            }
+            return
+        }
         val message = update.message ?: return
         if (message.from == null) return
         val chatId = message.chat.id
         val userId = message.from.id
         val user = userService.ensureUser(userId, message.from.language_code)
+        if (user.isBlocked) {
+            userService.markUnblocked(userId)
+            user.isBlocked = false
+            user.blockedAt = null
+        }
         val language = user.locale?.let { i18n.resolveLanguage(it) } ?: i18n.baseLanguage()
 
         val rawText = message.text
@@ -136,6 +149,29 @@ class UpdateProcessor(
             }
             trimmedText.startsWith(COMMAND_WHOAMI) -> handleWhoAmI(chatId, message.from, language)
             else -> handleContentMessage(user, chatId, trimmedText, language)
+        }
+    }
+
+    private suspend fun handleMyChatMember(update: ChatMemberUpdated) {
+        val userId = update.chat.id
+        val user = userService.ensureUser(userId, update.from?.language_code)
+        val status = update.newChatMember.status.lowercase()
+        when (status) {
+            "kicked", "blocked", "left" -> {
+                userService.markBlocked(userId)
+                user.isBlocked = true
+                user.blockedAt = Instant.now(ClockProvider.clock)
+                logger.info("User {} marked as blocked via status {}", userId, status)
+            }
+            "member", "restricted" -> {
+                userService.markUnblocked(userId)
+                user.isBlocked = false
+                user.blockedAt = null
+                logger.info("User {} marked as unblocked via status {}", userId, status)
+            }
+            else -> {
+                logger.debug("Ignored my_chat_member status {} for user {}", status, userId)
+            }
         }
     }
 
@@ -520,13 +556,30 @@ class UpdateProcessor(
 
     private suspend fun handleAdminStatsAction(userId: Long, chatId: Long, language: String) {
         val stats = adminService.collectOverview()
-        val blockedValue = stats.blockedUsers?.toString() ?: i18n.translate(language, "admin.common.not_available")
+        val blockedLine = buildString {
+            append(
+                i18n.translate(
+                    language,
+                    "admin.stats.blocked",
+                    mapOf("value" to stats.blockedUsers.toString())
+                )
+            )
+            if (stats.blockedUsersLast30Days > 0) {
+                append(
+                    i18n.translate(
+                        language,
+                        "admin.stats.blocked30",
+                        mapOf("value" to stats.blockedUsersLast30Days.toString())
+                    )
+                )
+            }
+        }
         val message = listOf(
             i18n.translate(language, "admin.stats.total", mapOf("value" to stats.totalUsers.toString())),
             i18n.translate(language, "admin.stats.active7", mapOf("value" to stats.active7Days.toString())),
             i18n.translate(language, "admin.stats.active30", mapOf("value" to stats.active30Days.toString())),
             i18n.translate(language, "admin.stats.premium", mapOf("value" to stats.activePremiumUsers.toString())),
-            i18n.translate(language, "admin.stats.blocked", mapOf("value" to blockedValue))
+            blockedLine
         ).joinToString(separator = "\n")
         telegramService.safeSendMessage(chatId, message)
         logger.info("Admin {} requested stats", userId)
