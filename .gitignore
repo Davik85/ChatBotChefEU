@@ -6,6 +6,10 @@ out/
 !**/src/main/**/build/
 !**/src/test/**/build/
 
+.run/
+.run/update_offset.dat
+
+
 # Project files
 ChatBotChefEU.bundle
 ChatBotChefEU.iml
