@@ -2,6 +2,7 @@ package app.openai
 
 import app.OpenAIConfig
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.databind.ObjectMapper
 import kotlinx.coroutines.delay
 import okhttp3.MediaType.Companion.toMediaType
@@ -16,6 +17,7 @@ private val MEDIA_TYPE_JSON = "application/json; charset=utf-8".toMediaType()
 private const val OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 private const val MAX_LOG_BODY_LENGTH = 2_048
 private const val DEFAULT_TEMPERATURE = 0.7
+private const val GPT5_MODEL_PREFIX = "gpt-5-"
 private const val DEFAULT_RETRY_ATTEMPTS = 3
 private const val DEFAULT_RETRY_DELAY_MS = 350L
 
@@ -34,7 +36,7 @@ class OpenAIClient(
         val payload = ChatCompletionRequest(
             model = config.model,
             messages = messages,
-            temperature = DEFAULT_TEMPERATURE
+            temperature = selectTemperature(config.model)
         )
         val body = mapper.writeValueAsString(payload).toRequestBody(MEDIA_TYPE_JSON)
         val requestBuilder = Request.Builder()
@@ -121,6 +123,14 @@ class OpenAIClient(
 
 private data class CompletionResult(val content: String?, val retryable: Boolean)
 
+private fun selectTemperature(model: String): Double? {
+    return if (model.startsWith(GPT5_MODEL_PREFIX, ignoreCase = true)) {
+        null
+    } else {
+        DEFAULT_TEMPERATURE
+    }
+}
+
 private fun truncateForLog(content: String, limit: Int = MAX_LOG_BODY_LENGTH): String {
     if (content.length <= limit) {
         return content
@@ -129,10 +139,11 @@ private fun truncateForLog(content: String, limit: Int = MAX_LOG_BODY_LENGTH): S
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
+@JsonInclude(JsonInclude.Include.NON_NULL)
 data class ChatCompletionRequest(
     val model: String,
     val messages: List<ChatMessage>,
-    val temperature: Double
+    val temperature: Double?
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
