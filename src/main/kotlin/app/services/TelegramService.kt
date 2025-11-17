@@ -13,6 +13,7 @@ import app.telegram.TelegramClient
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.min
 import org.slf4j.LoggerFactory
 
 class TelegramService(
@@ -24,22 +25,42 @@ class TelegramService(
     private val welcomeImageUrl = config.welcomeImageUrl?.takeIf { it.isNotBlank() }
 
     suspend fun safeSendMessage(chatId: Long, text: String, replyMarkup: Any? = null): Long? {
-        val outbound = buildOutbound(chatId, text, replyMarkup)
-        return try {
-            telegramClient.sendMessage(outbound)?.message_id
-                ?: run {
-                    logger.warn(
-                        "Telegram sendMessage returned null message_id for chat={} textPreview={}",
-                        chatId,
-                        preview(text)
-                    )
-                    null
-                }
-        } catch (ex: Exception) {
-            if (ex is CancellationException) throw ex
-            logger.warn("Failed to send message chat={} error={}", chatId, ex.message)
-            null
+        val parts = splitForTelegram(text)
+        if (parts.isEmpty()) {
+            logger.warn("Attempted to send empty message chat={}", chatId)
+            return null
         }
+        if (parts.size > 1) {
+            logger.debug("Splitting message for chat={} into {} parts", chatId, parts.size)
+        }
+        var lastMessageId: Long? = null
+        parts.forEachIndexed { index, chunk ->
+            val markup = if (index == parts.lastIndex) replyMarkup else null
+            val outbound = buildOutbound(chatId, chunk, markup)
+            val messageId = try {
+                telegramClient.sendMessage(outbound)?.message_id
+                    ?: run {
+                        logger.warn(
+                            "Telegram sendMessage returned null message_id for chat={} textPreview={}",
+                            chatId,
+                            preview(chunk)
+                        )
+                        return null
+                    }
+            } catch (ex: Exception) {
+                if (ex is CancellationException) throw ex
+                logger.warn(
+                    "Failed to send message chat={} part={}/{} error={}",
+                    chatId,
+                    index + 1,
+                    parts.size,
+                    ex.message
+                )
+                return null
+            }
+            lastMessageId = messageId
+        }
+        return lastMessageId
     }
 
     suspend fun sendWelcomeImage(chatId: Long): Long? {
@@ -298,6 +319,61 @@ class TelegramService(
 
     private fun preview(text: String): String =
         text.replace("\n", " ").take(60).let { if (text.length > 60) "$it…" else it }
+
+    fun splitForTelegram(text: String, maxLen: Int = TELEGRAM_MAX_MESSAGE_LENGTH): List<String> {
+        if (text.isEmpty()) {
+            return emptyList()
+        }
+        val normalized = text.replace("\r\n", "\n")
+        val effectiveMax = maxLen.coerceAtMost(TELEGRAM_MAX_MESSAGE_LENGTH).coerceAtLeast(1)
+        val candidateLimit = (effectiveMax - SAFE_MARGIN).coerceAtLeast(effectiveMax / 2)
+        val limit = candidateLimit.coerceAtMost(effectiveMax).coerceAtLeast(1)
+        if (normalized.length <= limit) {
+            return listOf(normalized)
+        }
+        val result = mutableListOf<String>()
+        var start = 0
+        val length = normalized.length
+        while (start < length) {
+            var end = (start + limit).coerceAtMost(length)
+            if (end == length) {
+                result += normalized.substring(start, end)
+                break
+            }
+            var splitPos = findSplitPosition(normalized, start, end)
+            if (splitPos <= start) {
+                splitPos = normalized.offsetByCodePoints(start, min(limit, length - start))
+            }
+            val chunk = normalized.substring(start, splitPos)
+            if (chunk.isNotEmpty()) {
+                result += chunk
+            }
+            start = splitPos
+            while (start < length && normalized[start] == '\n') start++
+            while (start < length && normalized[start] == ' ') start++
+        }
+        if (result.isEmpty()) {
+            result += normalized.take(limit)
+        }
+        return result
+    }
+
+    private fun findSplitPosition(text: String, start: Int, candidateEnd: Int): Int {
+        val paragraph = text.lastIndexOf("\n\n", candidateEnd - 1)
+        if (paragraph >= start) return paragraph + 2
+        val newline = text.lastIndexOf('\n', candidateEnd - 1)
+        if (newline >= start) return newline + 1
+        val space = text.lastIndexOf(' ', candidateEnd - 1)
+        if (space >= start) return space + 1
+        val punctuation = text.lastIndexOfAny(charArrayOf('.', '!', '?'), candidateEnd - 1)
+        if (punctuation >= start) return punctuation + 1
+        return start
+    }
+
+    companion object {
+        private const val TELEGRAM_MAX_MESSAGE_LENGTH = 4_096
+        private const val SAFE_MARGIN = 80
+    }
 
     private fun loadWelcomeResource(): ByteArray? {
         val loader = javaClass.classLoader ?: return null

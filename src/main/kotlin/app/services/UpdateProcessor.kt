@@ -71,7 +71,24 @@ class UpdateProcessor(
         } catch (ex: CancellationException) {
             throw ex
         } catch (ex: Exception) {
-            logger.error("Failed to handle update {}", update.updateId, ex)
+            val userId = update.userId()
+            val mode = if (userId != null) {
+                try {
+                    userService.findUser(userId)?.mode
+                } catch (lookup: Exception) {
+                    logger.debug("Failed to resolve user {} during error logging: {}", userId, lookup.message)
+                    null
+                }
+            } else {
+                null
+            }
+            logger.error(
+                "Failed to handle update {} user={} mode={}",
+                update.updateId,
+                userId,
+                mode,
+                ex
+            )
             handleProcessingFailure(update)
         }
     }
@@ -1069,17 +1086,36 @@ class UpdateProcessor(
             }
             add(ChatMessage(role = ROLE_USER, content = "$stylePrefix$text"))
         }
-        val completion = openAIClient.complete(messages)
-        val intro = i18n.translate(language, "chef_intro")
+        val completion = runCatching { openAIClient.complete(messages) }
+            .onFailure {
+                logger.error(
+                    "OpenAI completion threw user={} lang={} mode={} preview={}",
+                    userId,
+                    language,
+                    activeMode,
+                    previewForLogs(text),
+                    it
+                )
+            }
+            .getOrNull()
         val body = completion?.trim().orEmpty()
-        val responseText = if (body.isNotEmpty()) {
-            "$intro\n$body"
-        } else {
-            i18n.translate(language, "ai_error")
+        if (body.isEmpty()) {
+            logger.warn(
+                "OpenAI completion empty user={} lang={} mode={} preview={}",
+                userId,
+                language,
+                activeMode,
+                previewForLogs(text)
+            )
+            val fallback = i18n.translate(language, "ai_error")
+            telegramService.safeSendMessage(chatId, fallback)
+            messageHistoryService.append(userId, ROLE_ASSISTANT, fallback)
+            return
         }
+        val intro = i18n.translate(language, "chef_intro")
+        val responseText = "$intro\n$body"
         telegramService.safeSendMessage(chatId, responseText)
-        val assistantMessage = if (body.isNotEmpty()) body else responseText
-        messageHistoryService.append(userId, ROLE_ASSISTANT, assistantMessage)
+        messageHistoryService.append(userId, ROLE_ASSISTANT, body)
     }
 
     private suspend fun handleProcessingFailure(update: Update) {
@@ -1114,4 +1150,15 @@ class UpdateProcessor(
         "support_email" to helpConfig.supportEmail
     ).mapValues { (_, value) -> value.ifBlank { "-" } }
 
+}
+
+private fun previewForLogs(text: String, limit: Int = 80): String {
+    val normalized = text.replace("\n", " ").trim()
+    return if (normalized.length <= limit) normalized else normalized.take(limit) + "…"
+}
+
+private fun Update.userId(): Long? {
+    return message?.from?.id
+        ?: callbackQuery?.from?.id
+        ?: myChatMember?.from?.id
 }

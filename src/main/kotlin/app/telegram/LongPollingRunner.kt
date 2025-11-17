@@ -3,6 +3,7 @@ package app.telegram
 import app.TelegramConfig
 import app.Update
 import app.services.UpdateHandler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -64,11 +65,17 @@ class LongPollingRunner(
         for (u in updates) {
             try {
                 handler.handle(u)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val userId = u.message?.from?.id
+                    ?: u.callbackQuery?.from?.id
+                    ?: u.myChatMember?.from?.id
+                logger.error("LongPolling: handle error updateId={} userId={}", u.updateId, userId, e)
+            } finally {
                 if (u.updateId > lastUpdateId) {
                     lastUpdateId = u.updateId
                 }
-            } catch (e: Exception) {
-                logger.error("LongPolling: handle error updateId={}", u.updateId, e)
             }
         }
         saveOffset(lastUpdateId)
